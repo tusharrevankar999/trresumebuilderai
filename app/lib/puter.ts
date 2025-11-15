@@ -54,6 +54,7 @@ interface PuterStore {
         refreshUser: () => Promise<void>;
         checkAuthStatus: () => Promise<boolean>;
         getUser: () => PuterUser | null;
+        setHardcodedAuth: (user: PuterUser) => void;
     };
     fs: {
         write: (
@@ -104,15 +105,16 @@ export const usePuterStore = create<PuterStore>((set, get) => {
         set({
             error: msg,
             isLoading: false,
-            auth: {
-                user: null,
-                isAuthenticated: false,
-                signIn: get().auth.signIn,
-                signOut: get().auth.signOut,
-                refreshUser: get().auth.refreshUser,
-                checkAuthStatus: get().auth.checkAuthStatus,
-                getUser: get().auth.getUser,
-            },
+                    auth: {
+                        user: null,
+                        isAuthenticated: false,
+                        signIn: get().auth.signIn,
+                        signOut: get().auth.signOut,
+                        refreshUser: get().auth.refreshUser,
+                        checkAuthStatus: get().auth.checkAuthStatus,
+                        getUser: get().auth.getUser,
+                        setHardcodedAuth: get().auth.setHardcodedAuth,
+                    },
         });
     };
 
@@ -138,6 +140,7 @@ export const usePuterStore = create<PuterStore>((set, get) => {
                         refreshUser: get().auth.refreshUser,
                         checkAuthStatus: get().auth.checkAuthStatus,
                         getUser: () => user,
+                        setHardcodedAuth: get().auth.setHardcodedAuth,
                     },
                     isLoading: false,
                 });
@@ -152,6 +155,7 @@ export const usePuterStore = create<PuterStore>((set, get) => {
                         refreshUser: get().auth.refreshUser,
                         checkAuthStatus: get().auth.checkAuthStatus,
                         getUser: () => null,
+                        setHardcodedAuth: get().auth.setHardcodedAuth,
                     },
                     isLoading: false,
                 });
@@ -203,6 +207,7 @@ export const usePuterStore = create<PuterStore>((set, get) => {
                     refreshUser: get().auth.refreshUser,
                     checkAuthStatus: get().auth.checkAuthStatus,
                     getUser: () => null,
+                    setHardcodedAuth: get().auth.setHardcodedAuth,
                 },
                 isLoading: false,
             });
@@ -232,6 +237,7 @@ export const usePuterStore = create<PuterStore>((set, get) => {
                     refreshUser: get().auth.refreshUser,
                     checkAuthStatus: get().auth.checkAuthStatus,
                     getUser: () => user,
+                    setHardcodedAuth: get().auth.setHardcodedAuth,
                 },
                 isLoading: false,
             });
@@ -411,6 +417,22 @@ export const usePuterStore = create<PuterStore>((set, get) => {
         return puter.kv.flush();
     };
 
+    const setHardcodedAuth = (user: PuterUser): void => {
+        set({
+            auth: {
+                user,
+                isAuthenticated: true,
+                signIn: get().auth.signIn,
+                signOut: get().auth.signOut,
+                refreshUser: get().auth.refreshUser,
+                checkAuthStatus: get().auth.checkAuthStatus,
+                getUser: () => user,
+                setHardcodedAuth: get().auth.setHardcodedAuth,
+            },
+            isLoading: false,
+        });
+    };
+
     return {
         isLoading: true,
         error: null,
@@ -423,6 +445,7 @@ export const usePuterStore = create<PuterStore>((set, get) => {
             refreshUser,
             checkAuthStatus,
             getUser: () => get().auth.user,
+            setHardcodedAuth,
         },
         fs: {
             write: (path: string, data: string | File | Blob) => write(path, data),
