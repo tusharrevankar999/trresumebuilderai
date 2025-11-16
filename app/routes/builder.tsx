@@ -99,6 +99,69 @@ const Builder = () => {
         }]
     });
 
+    // ---- Demo/Sample content for "Modern Professional" template ----
+    const getModernProfessionalSample = (): ResumeData => ({
+        personalInfo: {
+            fullName: 'John Smith',
+            email: 'john.smith@email.com',
+            phone: '+1 (555) 123-4567',
+            location: 'San Francisco, CA',
+            linkedin: 'linkedin.com/in/johnsmith',
+            portfolio: 'github.com/johnsmith'
+        },
+        summary:
+            'Results‑driven Software Engineer with 5+ years of experience building scalable web applications. Specialized in React, Node.js, and cloud technologies with a proven track record of delivering high‑impact projects.',
+        experience: [
+            {
+                company: 'Tech Corp',
+                position: 'Senior Software Engineer',
+                startDate: 'Jan 2021',
+                endDate: 'Present',
+                location: 'San Francisco, CA',
+                current: true,
+                description: [
+                    'Led development of microservices architecture serving 10M+ users, improving system reliability by 40%.',
+                    'Reduced deployment time by 60% through implementation of CI/CD pipelines.',
+                    'Mentored a team of 5 junior engineers, improving code quality and review practices.'
+                ]
+            }
+        ],
+        education: [
+            {
+                degree: 'Bachelor of Science',
+                school: 'University of California',
+                gpa: '3.8/4.0',
+                graduationDate: 'May 2019',
+                // optional fields kept default/empty
+            }
+        ],
+        skills: {
+            technical: [
+                'JavaScript',
+                'TypeScript',
+                'React',
+                'Node.js',
+                'Python',
+                'AWS',
+                'Docker',
+                'PostgreSQL'
+            ],
+            soft: ['Leadership', 'Problem Solving', 'Communication']
+        },
+        projects: [
+            {
+                name: 'E‑commerce Platform',
+                description:
+                    'Built full‑stack platform processing $1M+ in monthly transactions. Integrated payments, search, and analytics. Tech: React, Node.js, MongoDB, Stripe.'
+            }
+        ],
+        certifications: [{ name: 'AWS Certified Solutions Architect' }],
+        achievements: [
+            { name: 'Hackathon Winner 2022' },
+            { name: 'Employee of the Quarter Q3 2023' }
+        ]
+    });
+
     // Parse extracted text and populate form fields
     const parseResumeText = (text: string) => {
         const lines = text.split('\n').map(line => line.trim()).filter(line => line.length > 0);
@@ -317,6 +380,27 @@ const Builder = () => {
 
         convertPdf();
     }, [uploadedFile]);
+
+    // When user selects "Modern Professional" and form is empty (no user/parsed data and no upload),
+    // prefill with a polished sample so the preview looks like the shared screenshot.
+    useEffect(() => {
+        if (
+            selectedTemplate === 'modern-professional' &&
+            !hasFormData() &&
+            !uploadedFile &&
+            !isConvertingPdf
+        ) {
+            setResumeData(prev => {
+                // Only prefill if still empty at the moment of applying
+                const empty =
+                    !prev.personalInfo?.fullName &&
+                    !prev.summary &&
+                    !(prev.experience && prev.experience[0] && prev.experience[0].company);
+                return empty ? getModernProfessionalSample() : prev;
+            });
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [selectedTemplate, isConvertingPdf, uploadedFile]);
 
     // Load and convert Professional CV Resume.pdf to image on mount
     useEffect(() => {
