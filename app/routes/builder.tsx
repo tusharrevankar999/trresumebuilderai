@@ -1,10 +1,12 @@
 import {Link, useNavigate} from "react-router";
-import {useState, useEffect} from "react";
+import {useState, useEffect, useRef} from "react";
 import FileUploader from "~/components/FileUploader";
 import {convertPdfToImage, extractTextFromPdf} from "~/lib/pdf2img";
 import {parseResumeWithGemini} from "~/lib/gemini";
 import AIFeatures from "~/components/AIFeatures";
 import {generateSummary, generateBulletPoints, improveText, quantifyAchievement} from "~/lib/ai-features";
+import jsPDF from "jspdf";
+import html2canvas from "html2canvas";
 
 export const meta = () => ([
     { title: 'Resumind | Resume Builder' },
@@ -54,6 +56,7 @@ interface ResumeData {
 
 const Builder = () => {
     const navigate = useNavigate();
+    const resumePreviewRef = useRef<HTMLDivElement>(null);
     const [uploadedFile, setUploadedFile] = useState<File | null>(null);
     const [resumeImageUrl, setResumeImageUrl] = useState<string>('');
     const [resumePdfUrl, setResumePdfUrl] = useState<string>('');
@@ -62,6 +65,7 @@ const Builder = () => {
     const [professionalResumeImageUrl, setProfessionalResumeImageUrl] = useState<string>('');
     const [selectedTemplate, setSelectedTemplate] = useState<string>('modern-professional');
     const [activeSection, setActiveSection] = useState<string>('personal');
+    const [isExporting, setIsExporting] = useState(false);
     const [resumeData, setResumeData] = useState<ResumeData>({
         personalInfo: {
             fullName: '',
@@ -721,6 +725,395 @@ const Builder = () => {
         );
     };
 
+    const handleExportPdf = async () => {
+        if (!resumePreviewRef.current) {
+            alert('Resume preview not available for export');
+            return;
+        }
+
+        setIsExporting(true);
+        try {
+            const element = resumePreviewRef.current;
+            
+            // Scroll element into view to ensure it's fully rendered
+            element.scrollIntoView({ behavior: 'instant', block: 'start' });
+            await new Promise(resolve => setTimeout(resolve, 100));
+            
+            // Clone the element and remove SVG elements before html2canvas processes it
+            const clone = element.cloneNode(true) as HTMLElement;
+            const svgs = clone.querySelectorAll('svg');
+            svgs.forEach(svg => {
+                const parent = svg.parentElement;
+                if (parent) {
+                    // Determine icon type from parent context
+                    const parentText = parent.textContent || '';
+                    const iconText = parentText.includes('@') ? '✉' :
+                                   parentText.includes('+') || parentText.match(/\d/) ? '📞' :
+                                   parentText.includes('linkedin') ? 'in' :
+                                   parentText.includes('github') || parentText.includes('portfolio') ? '🔗' :
+                                   '📍';
+                    
+                    // Replace SVG with simple span
+                    const span = document.createElement('span');
+                    span.textContent = iconText;
+                    span.style.display = 'inline-block';
+                    span.style.marginRight = '4px';
+                    span.style.width = '16px';
+                    span.style.height = '16px';
+                    span.style.textAlign = 'center';
+                    span.style.fontSize = '14px';
+                    span.style.color = 'rgb(0, 0, 0)';
+                    parent.replaceChild(span, svg);
+                }
+            });
+            
+            // Temporarily append clone to body (off-screen) for html2canvas
+            clone.style.position = 'absolute';
+            clone.style.left = '-9999px';
+            clone.style.top = '0';
+            document.body.appendChild(clone);
+            
+            // Ensure clone has proper width to prevent text cutoff
+            clone.style.width = element.offsetWidth + 'px';
+            clone.style.maxWidth = element.offsetWidth + 'px';
+            clone.style.overflow = 'visible';
+            
+            // Wait a moment for styles to apply
+            await new Promise(resolve => setTimeout(resolve, 50));
+            
+            // Capture the cloned element with comprehensive options
+            const canvas = await html2canvas(clone, {
+                scale: 2,
+                useCORS: true,
+                logging: false,
+                backgroundColor: '#ffffff',
+                width: element.scrollWidth,
+                height: element.scrollHeight,
+                windowWidth: element.scrollWidth,
+                windowHeight: element.scrollHeight,
+                scrollX: 0,
+                scrollY: 0,
+                allowTaint: false,
+                removeContainer: false,
+                imageTimeout: 15000,
+                onclone: (clonedDoc, clonedElement) => {
+                    // Remove all stylesheets from cloned document to avoid oklch parsing
+                    const styleSheets = Array.from(clonedDoc.styleSheets);
+                    styleSheets.forEach((sheet) => {
+                        try {
+                            if (sheet.ownerNode) {
+                                sheet.ownerNode.remove();
+                            }
+                        } catch (e) {
+                            // Some stylesheets may not be removable
+                        }
+                    });
+                    
+                    // Remove all style and link tags
+                    const styleTags = Array.from(clonedDoc.querySelectorAll('style, link[rel="stylesheet"]'));
+                    styleTags.forEach(tag => tag.remove());
+                    
+                    // Inject comprehensive safe stylesheet with rgb colors only
+                    const safeStyle = clonedDoc.createElement('style');
+                    safeStyle.textContent = `
+                        * {
+                            box-sizing: border-box;
+                        }
+                        body {
+                            margin: 0;
+                            padding: 0;
+                            font-family: "Mona Sans", ui-sans-serif, system-ui, sans-serif;
+                            background: white;
+                            color: rgb(0, 0, 0);
+                        }
+                        .gradient-border {
+                            background: linear-gradient(to bottom, rgba(193, 211, 248, 0.1), rgba(167, 191, 241, 0.3)) !important;
+                            padding: 2.5rem !important;
+                            border-radius: 1rem !important;
+                        }
+                        .text-gradient {
+                            color: rgb(0, 0, 0) !important;
+                            background: none !important;
+                        }
+                        h1 {
+                            font-size: 1.875rem;
+                            font-weight: 700;
+                            line-height: 1.2;
+                            margin: 0;
+                            color: rgb(17, 24, 39);
+                        }
+                        h2 {
+                            font-size: 0.75rem;
+                            font-weight: 700;
+                            text-transform: uppercase;
+                            margin: 0;
+                            margin-top: 1.25rem;
+                            margin-bottom: 0.75rem;
+                            color: rgb(17, 24, 39);
+                            border-bottom: 1px solid rgb(17, 24, 39);
+                            padding-bottom: 0.25rem;
+                            line-height: 1.5;
+                            display: block;
+                        }
+                        h3 {
+                            font-size: 0.875rem;
+                            font-weight: 600;
+                            margin: 0;
+                            color: rgb(17, 24, 39);
+                        }
+                        p {
+                            margin: 0;
+                            color: rgb(55, 65, 81);
+                            font-size: 0.875rem;
+                            line-height: 1.5;
+                            word-wrap: break-word;
+                            overflow-wrap: break-word;
+                        }
+                        span {
+                            color: inherit;
+                            font-size: inherit;
+                            word-wrap: break-word;
+                            overflow-wrap: break-word;
+                        }
+                        div {
+                            word-wrap: break-word;
+                            overflow-wrap: break-word;
+                        }
+                        ul, ol {
+                            margin: 0;
+                            padding-left: 1.5rem;
+                        }
+                        li {
+                            margin: 0.125rem 0;
+                            color: rgb(55, 65, 81);
+                            font-size: 0.875rem;
+                            line-height: 1.5;
+                        }
+                        .flex {
+                            display: flex;
+                        }
+                        .flex-wrap {
+                            flex-wrap: wrap;
+                        }
+                        .items-center {
+                            align-items: center;
+                        }
+                        .gap-2 {
+                            gap: 0.5rem;
+                        }
+                        .gap-3 {
+                            gap: 0.75rem;
+                        }
+                        .space-y-3 > * + * {
+                            margin-top: 0.75rem;
+                        }
+                        .space-y-4 > * + * {
+                            margin-top: 1rem;
+                        }
+                        .space-y-5 > * + * {
+                            margin-top: 1.25rem;
+                        }
+                        .mb-1 {
+                            margin-bottom: 0.25rem;
+                        }
+                        .mb-2 {
+                            margin-bottom: 0.5rem;
+                        }
+                        .mb-3 {
+                            margin-bottom: 0.75rem;
+                        }
+                        .mt-2 {
+                            margin-top: 0.5rem;
+                        }
+                        .mt-3 {
+                            margin-top: 0.75rem;
+                        }
+                        .pb-3 {
+                            padding-bottom: 0.75rem;
+                        }
+                        .px-3 {
+                            padding-left: 0.75rem;
+                            padding-right: 0.75rem;
+                        }
+                        .py-1 {
+                            padding-top: 0.25rem;
+                            padding-bottom: 0.25rem;
+                        }
+                        .bg-gray-100 {
+                            background-color: rgb(243, 244, 246);
+                        }
+                        .rounded {
+                            border-radius: 0.25rem;
+                        }
+                        .text-sm {
+                            font-size: 0.875rem;
+                        }
+                        .text-gray-700 {
+                            color: rgb(55, 65, 81);
+                        }
+                        .text-gray-900 {
+                            color: rgb(17, 24, 39);
+                        }
+                        .text-gray-600 {
+                            color: rgb(75, 85, 99);
+                        }
+                        .font-bold {
+                            font-weight: 700;
+                        }
+                        .font-semibold {
+                            font-weight: 600;
+                        }
+                        .font-medium {
+                            font-weight: 500;
+                        }
+                        .justify-between {
+                            justify-content: space-between;
+                        }
+                        .text-right {
+                            text-align: right;
+                        }
+                        .leading-relaxed {
+                            line-height: 1.625;
+                        }
+                    `;
+                    clonedDoc.head.appendChild(safeStyle);
+                    
+                    // Copy ALL computed styles as inline styles for all elements to preserve exact appearance
+                    const allElements = clonedDoc.querySelectorAll('*');
+                    const originalElements = clone.querySelectorAll('*');
+                    
+                    allElements.forEach((clonedEl, index) => {
+                        if (index < originalElements.length) {
+                            const originalEl = originalElements[index] as HTMLElement;
+                            const htmlEl = clonedEl as HTMLElement;
+                            
+                            try {
+                                const computed = window.getComputedStyle(originalEl);
+                                
+                                // Copy comprehensive list of all CSS properties
+                                const allProps = [
+                                    // Typography
+                                    'color', 'fontSize', 'fontWeight', 'fontFamily', 'fontStyle', 
+                                    'textDecoration', 'textTransform', 'letterSpacing', 'lineHeight',
+                                    'textAlign', 'whiteSpace', 'wordWrap', 'textOverflow',
+                                    // Spacing
+                                    'padding', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft',
+                                    'margin', 'marginTop', 'marginRight', 'marginBottom', 'marginLeft',
+                                    // Layout
+                                    'display', 'position', 'top', 'right', 'bottom', 'left',
+                                    'width', 'height', 'minWidth', 'minHeight', 'maxWidth', 'maxHeight',
+                                    'flex', 'flexDirection', 'flexWrap', 'flexGrow', 'flexShrink', 'flexBasis',
+                                    'justifyContent', 'alignItems', 'alignSelf', 'alignContent',
+                                    'gap', 'rowGap', 'columnGap',
+                                    'grid', 'gridTemplateColumns', 'gridTemplateRows', 'gridColumn', 'gridRow',
+                                    // Borders & Background
+                                    'border', 'borderTop', 'borderRight', 'borderBottom', 'borderLeft',
+                                    'borderWidth', 'borderStyle', 'borderColor', 'borderRadius',
+                                    'backgroundColor', 'background', 'backgroundImage', 'backgroundSize',
+                                    'backgroundPosition', 'backgroundRepeat',
+                                    // Visual
+                                    'opacity', 'visibility', 'overflow', 'overflowX', 'overflowY',
+                                    'boxShadow', 'textShadow', 'transform', 'transformOrigin',
+                                    // Text overflow
+                                    'wordWrap', 'overflowWrap', 'wordBreak', 'textOverflow',
+                                    // Other
+                                    'zIndex', 'cursor', 'listStyle', 'listStyleType', 'listStylePosition'
+                                ];
+                                
+                                allProps.forEach(prop => {
+                                    try {
+                                        let value = computed.getPropertyValue(prop);
+                                        
+                                        // Replace any oklch values with rgb equivalents
+                                        if (value && value.includes('oklch')) {
+                                            if (prop === 'color') {
+                                                // Try to preserve color intent - use gray for text
+                                                value = 'rgb(55, 65, 81)';
+                                            } else if (prop === 'backgroundColor') {
+                                                value = 'transparent';
+                                            } else if (prop === 'borderColor') {
+                                                value = 'rgb(229, 231, 235)';
+                                            } else {
+                                                value = '';
+                                            }
+                                        }
+                                        
+                                        // Ensure text doesn't get cut off
+                                        if (prop === 'overflow' && (value === 'hidden' || value === 'clip')) {
+                                            value = 'visible';
+                                        }
+                                        if (prop === 'overflowX' && (value === 'hidden' || value === 'clip')) {
+                                            value = 'visible';
+                                        }
+                                        if (prop === 'overflowY' && (value === 'hidden' || value === 'clip')) {
+                                            value = 'visible';
+                                        }
+                                        
+                                        // Ensure word wrapping for text elements
+                                        if (['p', 'span', 'div', 'li'].includes(htmlEl.tagName.toLowerCase()) && 
+                                            !value && (prop === 'wordWrap' || prop === 'overflowWrap')) {
+                                            value = 'break-word';
+                                        }
+                                        
+                                        // Only set non-empty, non-default values
+                                        if (value && value.trim() !== '' && value !== 'none' && value !== 'normal') {
+                                            htmlEl.style.setProperty(prop, value);
+                                        }
+                                    } catch (e) {
+                                        // Ignore individual property errors
+                                    }
+                                });
+                                
+                                // Ensure elements with text have proper width constraints
+                                if (['p', 'span', 'div', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'].includes(htmlEl.tagName.toLowerCase())) {
+                                    const computedWidth = computed.getPropertyValue('width');
+                                    if (!computedWidth || computedWidth === 'auto' || computedWidth === '0px') {
+                                        htmlEl.style.maxWidth = '100%';
+                                    }
+                                    htmlEl.style.wordWrap = 'break-word';
+                                    htmlEl.style.overflowWrap = 'break-word';
+                                }
+                            } catch (e) {
+                                // Ignore errors for this element
+                            }
+                        }
+                    });
+                }
+            });
+            
+            // Clean up clone
+            document.body.removeChild(clone);
+
+            const imgData = canvas.toDataURL('image/png');
+            
+            // Calculate PDF dimensions (A4 size)
+            const pdfWidth = 210; // A4 width in mm
+            const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+            
+            // Create PDF
+            const pdf = new jsPDF({
+                orientation: pdfHeight > pdfWidth ? 'portrait' : 'landscape',
+                unit: 'mm',
+                format: [pdfWidth, pdfHeight]
+            });
+
+            pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+            
+            // Generate filename
+            const fileName = resumeData.personalInfo.fullName 
+                ? `${resumeData.personalInfo.fullName.replace(/\s+/g, '_')}_Resume.pdf`
+                : 'Resume.pdf';
+            
+            // Save PDF
+            pdf.save(fileName);
+        } catch (error) {
+            console.error('Error exporting PDF:', error);
+            alert('Failed to export resume. Please try again.');
+        } finally {
+            setIsExporting(false);
+        }
+    };
+
     return (
         <main className="!pt-0 min-h-screen bg-white">
             {/* Navigation */}
@@ -728,7 +1121,14 @@ const Builder = () => {
                 <Link to="/" className="back-button">
                     <img src="/icons/back.svg" alt="back" className="w-2.5 h-2.5" />
                     <span className="text-gray-800 text-sm font-semibold">Back to Homepage</span>
-                        </Link>
+                </Link>
+                <button 
+                    onClick={handleExportPdf}
+                    disabled={isExporting || !hasFormData()}
+                    className="primary-button w-fit"
+                >
+                    {isExporting ? 'Exporting...' : 'Export PDF'}
+                </button>
             </nav>
 
             <div className="flex flex-col lg:flex-row w-full lg:h-[calc(100vh-60px)] -mt-2">
@@ -1749,7 +2149,7 @@ const Builder = () => {
                             </div>
                         ) : hasFormData() ? (
                             // Show template-based resume when form has data (from extraction or manual entry)
-                            <div className="gradient-border max-w-4xl w-full bg-white rounded-2xl shadow-xl">
+                            <div ref={resumePreviewRef} className="gradient-border max-w-4xl w-full bg-white rounded-2xl shadow-xl">
                                 <div className="p-10 space-y-5">
                                 {/* Name and Contact */}
                                 <div className="pb-3">
@@ -1978,7 +2378,7 @@ const Builder = () => {
                                 </a>
                             </div>
                         ) : (
-                            <div className="gradient-border max-w-4xl w-full bg-white rounded-2xl shadow-xl">
+                            <div ref={resumePreviewRef} className="gradient-border max-w-4xl w-full bg-white rounded-2xl shadow-xl">
                                 <div className="p-10 space-y-5">
                                 {/* Name and Contact */}
                                 <div className="pb-3">
