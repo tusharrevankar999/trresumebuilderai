@@ -2,6 +2,9 @@ import {Link, useNavigate} from "react-router";
 import {useState, useEffect} from "react";
 import FileUploader from "~/components/FileUploader";
 import {convertPdfToImage, extractTextFromPdf} from "~/lib/pdf2img";
+import {parseResumeWithGemini} from "~/lib/gemini";
+import AIFeatures from "~/components/AIFeatures";
+import {generateSummary, generateBulletPoints, improveText, quantifyAchievement} from "~/lib/ai-features";
 
 export const meta = () => ([
     { title: 'Resumind | Resume Builder' },
@@ -55,6 +58,7 @@ const Builder = () => {
     const [resumeImageUrl, setResumeImageUrl] = useState<string>('');
     const [resumePdfUrl, setResumePdfUrl] = useState<string>('');
     const [isConvertingPdf, setIsConvertingPdf] = useState(false);
+    const [isParsing, setIsParsing] = useState(false);
     const [professionalResumeImageUrl, setProfessionalResumeImageUrl] = useState<string>('');
     const [selectedTemplate, setSelectedTemplate] = useState<string>('modern-professional');
     const [activeSection, setActiveSection] = useState<string>('personal');
@@ -362,11 +366,41 @@ const Builder = () => {
                         setResumeImageUrl(result.imageUrl);
                     }
 
-                    // Extract text and populate form
+                    // Extract text and populate form using Gemini AI
+                    setIsParsing(true);
                     const extractedText = await extractTextFromPdf(uploadedFile);
                     if (extractedText) {
+                        // Try Gemini AI first for better accuracy
+                        const geminiParsed = await parseResumeWithGemini(extractedText);
+                        if (geminiParsed) {
+                            // Use Gemini parsed data
+                            setResumeData(prev => ({
+                                ...prev,
+                                personalInfo: {
+                                    fullName: geminiParsed.personalInfo.fullName || prev.personalInfo.fullName,
+                                    email: geminiParsed.personalInfo.email || prev.personalInfo.email,
+                                    phone: geminiParsed.personalInfo.phone || prev.personalInfo.phone,
+                                    location: geminiParsed.personalInfo.location || prev.personalInfo.location,
+                                    linkedin: geminiParsed.personalInfo.linkedin || prev.personalInfo.linkedin,
+                                    portfolio: geminiParsed.personalInfo.portfolio || prev.personalInfo.portfolio
+                                },
+                                summary: geminiParsed.summary || prev.summary,
+                                experience: geminiParsed.experience.length > 0 ? geminiParsed.experience : prev.experience,
+                                education: geminiParsed.education.length > 0 ? geminiParsed.education : prev.education,
+                                skills: {
+                                    technical: geminiParsed.skills.technical.length > 0 ? geminiParsed.skills.technical : prev.skills.technical,
+                                    soft: geminiParsed.skills.soft.length > 0 ? geminiParsed.skills.soft : prev.skills.soft
+                                },
+                                projects: geminiParsed.projects.length > 0 ? geminiParsed.projects : prev.projects,
+                                certifications: geminiParsed.certifications.length > 0 ? geminiParsed.certifications : prev.certifications,
+                                achievements: geminiParsed.achievements.length > 0 ? geminiParsed.achievements : prev.achievements
+                            }));
+                        } else {
+                            // Fallback to regex parsing if Gemini fails
                         parseResumeText(extractedText);
                     }
+                    }
+                    setIsParsing(false);
                 } catch (error) {
                     console.error('Error processing PDF:', error);
                 } finally {
@@ -625,6 +659,7 @@ const Builder = () => {
         { id: 'projects', label: 'Projects' },
         { id: 'certifications', label: 'Certifications' },
         { id: 'achievements', label: 'Achievements' },
+        { id: 'ai-tools', label: '✨ AI Tools' },
     ];
 
     const getTemplateStyles = () => {
@@ -873,7 +908,18 @@ const Builder = () => {
                         {/* Summary Section */}
                         {activeSection === 'summary' && (
                             <div className="space-y-6">
+                                <div className="flex items-center justify-between">
                                 <h2 className="text-2xl font-bold text-gray-900">Professional Summary</h2>
+                                    <button
+                                        onClick={async () => {
+                                            const summary = await generateSummary(resumeData);
+                                            if (summary) updateSummary(summary);
+                                        }}
+                                        className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700"
+                                    >
+                                        ✨ AI Generate
+                                    </button>
+                                </div>
                                 <div className="form-div">
                                     <label>Summary</label>
                                     <textarea
@@ -948,16 +994,59 @@ const Builder = () => {
                                             </div>
                                         </div>
                                         <div className="form-div">
-                                            <label>Description</label>
+                                            <div className="flex items-center justify-between mb-2">
+                                                <label>Description</label>
+                                                <button
+                                                    onClick={async () => {
+                                                        const bullets = await generateBulletPoints(
+                                                            exp.position,
+                                                            exp.company,
+                                                            exp.description.filter(d => d.trim())
+                                                        );
+                                                        if (bullets.length > 0) {
+                                                            setResumeData(prev => ({
+                                                                ...prev,
+                                                                experience: prev.experience.map((e, i) =>
+                                                                    i === index ? { ...e, description: bullets } : e
+                                                                )
+                                                            }));
+                                                        }
+                                                    }}
+                                                    className="px-3 py-1 bg-blue-600 text-white rounded text-xs font-medium hover:bg-blue-700"
+                                                >
+                                                    ✨ AI Generate Bullets
+                                                </button>
+                                            </div>
                                             {exp.description.map((desc, descIndex) => (
-                                                <textarea
-                                                    key={descIndex}
-                                                    value={desc}
-                                                    onChange={(e) => updateExperienceDescription(index, descIndex, e.target.value)}
-                                                    placeholder="Describe your responsibilities and achievements..."
-                                                    rows={3}
-                                                    className="mb-2"
-                                                />
+                                                <div key={descIndex} className="mb-2">
+                                                    <textarea
+                                                        value={desc}
+                                                        onChange={(e) => updateExperienceDescription(index, descIndex, e.target.value)}
+                                                        placeholder="Describe your responsibilities and achievements..."
+                                                        rows={3}
+                                                        className="mb-1"
+                                                    />
+                                                    <div className="flex gap-2">
+                                                        <button
+                                                            onClick={async () => {
+                                                                const improved = await improveText(desc);
+                                                                if (improved) updateExperienceDescription(index, descIndex, improved);
+                                                            }}
+                                                            className="px-2 py-1 bg-gray-100 text-gray-700 rounded text-xs hover:bg-gray-200"
+                                                        >
+                                                            ✏️ Improve
+                                                        </button>
+                                                        <button
+                                                            onClick={async () => {
+                                                                const quantified = await quantifyAchievement(desc);
+                                                                if (quantified) updateExperienceDescription(index, descIndex, quantified);
+                                                            }}
+                                                            className="px-2 py-1 bg-gray-100 text-gray-700 rounded text-xs hover:bg-gray-200"
+                                                        >
+                                                            📊 Quantify
+                                                        </button>
+                                                    </div>
+                                                </div>
                                             ))}
                                             <button
                                                 onClick={() => addExperienceDescription(index)}
@@ -1173,6 +1262,26 @@ const Builder = () => {
                                         </div>
                                     ))}
                                 </div>
+                            </div>
+                        )}
+
+                        {/* AI Tools Section */}
+                        {activeSection === 'ai-tools' && (
+                            <div className="space-y-6">
+                                <h2 className="text-2xl font-bold text-gray-900">✨ AI-Powered Tools</h2>
+                                <AIFeatures
+                                    resumeData={resumeData}
+                                    onSummaryUpdate={updateSummary}
+                                    onBulletsUpdate={(expIndex, bullets) => {
+                                        setResumeData(prev => ({
+                                            ...prev,
+                                            experience: prev.experience.map((exp, i) =>
+                                                i === expIndex ? { ...exp, description: bullets } : exp
+                                            )
+                                        }));
+                                    }}
+                                    onDescriptionUpdate={updateExperienceDescription}
+                                />
                             </div>
                         )}
 
@@ -1631,10 +1740,12 @@ const Builder = () => {
                 {/* Right Side - Resume Preview/Document Viewer */}
                 <section className="w-full lg:w-[55%] bg-[url('/images/bg-small.svg')] bg-cover overflow-y-auto lg:sticky lg:top-0 lg:h-[calc(100vh-60px)] min-h-[500px] order-last">
                     <div className="flex items-start justify-center h-full py-6">
-                        {isConvertingPdf ? (
+                        {isConvertingPdf || isParsing ? (
                             <div className="flex flex-col items-center justify-center">
                                 <img src="/images/resume-scan-2.gif" className="w-full max-w-md" />
-                                <p className="text-gray-600 mt-4">Converting resume...</p>
+                                <p className="text-gray-600 mt-4">
+                                    {isConvertingPdf ? 'Converting resume...' : 'Analyzing resume with AI...'}
+                                </p>
                             </div>
                         ) : hasFormData() ? (
                             // Show template-based resume when form has data (from extraction or manual entry)
@@ -1843,7 +1954,7 @@ const Builder = () => {
                                     </div>
                                 )}
                             </div>
-                        </div>
+                            </div>
                         ) : resumeImageUrl && resumePdfUrl && !hasFormData() ? (
                             // Show uploaded resume only if no form data exists yet
                             <div className="animate-in fade-in duration-1000 gradient-border max-sm:m-0 w-full max-w-6xl my-auto">
