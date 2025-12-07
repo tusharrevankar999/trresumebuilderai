@@ -7,7 +7,7 @@ import {useEffect, useState} from "react";
 
 export function meta({}: Route.MetaArgs) {
   return [
-    { title: "Resumind | AI Resume Builder" },
+    { title: "ResumeAI | AI Resume Builder" },
     { name: "description", content: "Build professional, ATS-optimized resumes with AI assistance. Get noticed by top companies like Amazon, Google, and Microsoft." },
   ];
 }
@@ -78,13 +78,15 @@ export default function Home() {
       <section className="relative overflow-hidden pt-20 pb-32">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center">
-            <h1 className="text-5xl md:text-6xl lg:text-7xl font-bold mb-6 leading-tight">
-              <span className="text-black">Build Professional Resumes with </span>
-              <span className="text-gradient">AI Assistance</span>
+            <h1 className="text-3xl md:text-4xl lg:text-5xl font-bold mb-6 leading-tight">
+              <span className="text-black">Build Smart, ATS-Winning Resumes Instantly in minutes with </span>
+              <span className="text-gradient">AI</span>
             </h1>
-            <p className="text-xl md:text-2xl text-gray-600 mb-10 max-w-3xl mx-auto leading-relaxed">
-              Create ATS-optimized resumes that get you noticed by top companies like Amazon, Google, and Microsoft. 
-              AI-powered suggestions help you craft perfect bullet points and summaries.
+            <p className="text-[25px] text-gray-600 mb-10 max-w-3xl mx-auto leading-relaxed">
+              Create ATS-ready resumes that impress recruiters. Our AI turns your experience into strong, keyword-focused sections.
+            </p>
+            <p className="text-[25px] text-gray-600 mb-4 max-w-3xl mx-auto">
+              <span className="font-semibold">🚀 100% Free to Start — No Login or Signup Needed.</span>
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
               <button
@@ -99,7 +101,7 @@ export default function Home() {
                 className="bg-white border-2 border-gray-300 hover:border-gray-400 text-gray-800 font-semibold text-lg px-8 py-4 rounded-full shadow-md hover:shadow-lg transition-all duration-300"
                 type="button"
               >
-                View Templates
+                Review ATS
               </button>
             </div>
           </div>
@@ -270,7 +272,7 @@ export default function Home() {
             {/* Company Info */}
             <div className="col-span-1 md:col-span-2">
               <h3 className="text-2xl font-bold mb-4 bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-400">
-                Resumind
+                ResumeAI
               </h3>
               <p className="text-gray-400 mb-4">
                 Build professional, ATS-optimized resumes with AI assistance. 
@@ -328,7 +330,15 @@ export default function Home() {
 
           <div className="border-t border-gray-800 pt-8 flex flex-col md:flex-row justify-between items-center">
             <p className="text-gray-400 text-sm">
-              © 2024 Resumind. Built with React and AI.
+              © 2025 ResumeAI. Created by{' '}
+              <a 
+                href="https://www.instagram.com/tr_dev.tech/" 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="text-white hover:text-blue-400 transition-colors underline"
+              >
+                tr_dev.tech
+              </a>
             </p>
             <div className="flex gap-6 mt-4 md:mt-0">
               <a href="#" className="text-gray-400 hover:text-white transition-colors text-sm">

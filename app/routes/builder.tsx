@@ -11,7 +11,7 @@ import {saveResumeRecord} from "~/lib/firebase";
 import {Timestamp} from "firebase/firestore";
 
 export const meta = () => ([
-    { title: 'Resumind | Resume Builder' },
+    { title: 'ResumeAI | Resume Builder' },
     { name: 'description', content: 'Build professional resumes with AI assistance' },
 ])
 

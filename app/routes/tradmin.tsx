@@ -3,7 +3,7 @@ import Navbar from '~/components/Navbar';
 import { getResumeRecords, getATSAnalysisRecords, getCoverLetterRecords, getErrorLogs, type ResumeRecord, type ATSAnalysisRecord, type CoverLetterRecord, type ErrorLogRecord } from '~/lib/firebase';
 
 export const meta = () => ([
-    { title: 'Resumind | Admin Dashboard' },
+    { title: 'ResumeAI | Admin Dashboard' },
     { name: 'description', content: 'Admin dashboard for viewing all records' },
 ]);
 

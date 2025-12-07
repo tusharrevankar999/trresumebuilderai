@@ -12,7 +12,7 @@ import {saveATSAnalysisRecord} from "~/lib/firebase";
 import {Timestamp} from "firebase/firestore";
 
 export const meta = () => ([
-    { title: 'Resumind | Review ' },
+    { title: 'ResumeAI | Review ' },
     { name: 'description', content: 'Detailed overview of your resume' },
 ])
 

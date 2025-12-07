@@ -8,7 +8,7 @@ import { saveCoverLetterRecord } from '~/lib/firebase';
 import { Timestamp } from 'firebase/firestore';
 
 export const meta = () => ([
-    { title: 'Resumind | Cover Letter Generator' },
+    { title: 'ResumeAI | Cover Letter Generator' },
     { name: 'description', content: 'Generate a professional cover letter with AI in minutes' },
 ]);
 
