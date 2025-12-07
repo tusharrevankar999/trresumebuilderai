@@ -1,0 +1,17 @@
+// Copy and paste these rules into Firebase Console → Firestore Database → Rules
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Allow access to nested cvs collection under users
+    match /users/{userId}/cvs/{document=**} {
+      allow read, write: if true;
+    }
+    
+    // Allow reads and writes to ats_analyses collection
+    match /ats_analyses/{document=**} {
+      allow read, write: if true;
+    }
+  }
+}
+

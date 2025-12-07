@@ -66,22 +66,8 @@ interface PuterStore {
         delete: (path: string) => Promise<void>;
         readDir: (path: string) => Promise<FSItem[] | undefined>;
     };
-    ai: {
-        chat: (
-            prompt: string | ChatMessage[],
-            imageURL?: string | PuterChatOptions,
-            testMode?: boolean,
-            options?: PuterChatOptions
-        ) => Promise<AIResponse | undefined>;
-        feedback: (
-            path: string,
-            message: string
-        ) => Promise<AIResponse | undefined>;
-        img2txt: (
-            image: string | File | Blob,
-            testMode?: boolean
-        ) => Promise<string | undefined>;
-    };
+    // AI functions removed - using Gemini API instead
+    // All ATS analysis now uses Gemini API via analyzeResumeWithGemini()
     kv: {
         get: (key: string) => Promise<string | null | undefined>;
         set: (key: string, value: string) => Promise<boolean | undefined>;
@@ -316,58 +302,57 @@ export const usePuterStore = create<PuterStore>((set, get) => {
         return puter.fs.delete(path);
     };
 
-    const chat = async (
-        prompt: string | ChatMessage[],
-        imageURL?: string | PuterChatOptions,
-        testMode?: boolean,
-        options?: PuterChatOptions
-    ) => {
-        const puter = getPuter();
-        if (!puter) {
-            setError("Puter.js not available");
-            return;
-        }
-        // return puter.ai.chat(prompt, imageURL, testMode, options);
-        return puter.ai.chat(prompt, imageURL, testMode, options) as Promise<
-            AIResponse | undefined
-        >;
-    };
+    // AI functions removed - using Gemini API instead
+    // const chat = async (
+    //     prompt: string | ChatMessage[],
+    //     imageURL?: string | PuterChatOptions,
+    //     testMode?: boolean,
+    //     options?: PuterChatOptions
+    // ) => {
+    //     const puter = getPuter();
+    //     if (!puter) {
+    //         setError("Puter.js not available");
+    //         return;
+    //     }
+    //     return puter.ai.chat(prompt, imageURL, testMode, options) as Promise<
+    //         AIResponse | undefined
+    //     >;
+    // };
 
-    const feedback = async (path: string, message: string) => {
-        const puter = getPuter();
-        if (!puter) {
-            setError("Puter.js not available");
-            return;
-        }
+    // const feedback = async (path: string, message: string) => {
+    //     const puter = getPuter();
+    //     if (!puter) {
+    //         setError("Puter.js not available");
+    //         return;
+    //     }
+    //     return puter.ai.chat(
+    //         [
+    //             {
+    //                 role: "user",
+    //                 content: [
+    //                     {
+    //                         type: "file",
+    //                         puter_path: path,
+    //                     },
+    //                     {
+    //                         type: "text",
+    //                         text: message,
+    //                     },
+    //                 ],
+    //             },
+    //         ],
+    //         { model: "claude-3-7-sonnet" }
+    //     ) as Promise<AIResponse | undefined>;
+    // };
 
-        return puter.ai.chat(
-            [
-                {
-                    role: "user",
-                    content: [
-                        {
-                            type: "file",
-                            puter_path: path,
-                        },
-                        {
-                            type: "text",
-                            text: message,
-                        },
-                    ],
-                },
-            ],
-            { model: "claude-3-7-sonnet" }
-        ) as Promise<AIResponse | undefined>;
-    };
-
-    const img2txt = async (image: string | File | Blob, testMode?: boolean) => {
-        const puter = getPuter();
-        if (!puter) {
-            setError("Puter.js not available");
-            return;
-        }
-        return puter.ai.img2txt(image, testMode);
-    };
+    // const img2txt = async (image: string | File | Blob, testMode?: boolean) => {
+    //     const puter = getPuter();
+    //     if (!puter) {
+    //         setError("Puter.js not available");
+    //         return;
+    //     }
+    //     return puter.ai.img2txt(image, testMode);
+    // };
 
     const getKV = async (key: string) => {
         const puter = getPuter();
@@ -454,17 +439,18 @@ export const usePuterStore = create<PuterStore>((set, get) => {
             upload: (files: File[] | Blob[]) => upload(files),
             delete: (path: string) => deleteFile(path),
         },
-        ai: {
-            chat: (
-                prompt: string | ChatMessage[],
-                imageURL?: string | PuterChatOptions,
-                testMode?: boolean,
-                options?: PuterChatOptions
-            ) => chat(prompt, imageURL, testMode, options),
-            feedback: (path: string, message: string) => feedback(path, message),
-            img2txt: (image: string | File | Blob, testMode?: boolean) =>
-                img2txt(image, testMode),
-        },
+        // AI functions removed - using Gemini API instead
+        // ai: {
+        //     chat: (
+        //         prompt: string | ChatMessage[],
+        //         imageURL?: string | PuterChatOptions,
+        //         testMode?: boolean,
+        //         options?: PuterChatOptions
+        //     ) => chat(prompt, imageURL, testMode, options),
+        //     feedback: (path: string, message: string) => feedback(path, message),
+        //     img2txt: (image: string | File | Blob, testMode?: boolean) =>
+        //         img2txt(image, testMode),
+        // },
         kv: {
             get: (key: string) => getKV(key),
             set: (key: string, value: string) => setKV(key, value),

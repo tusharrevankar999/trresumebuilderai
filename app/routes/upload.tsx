@@ -3,12 +3,12 @@ import Navbar from "~/components/Navbar";
 import FileUploader from "~/components/FileUploader";
 import {usePuterStore} from "~/lib/puter";
 import {useNavigate} from "react-router";
-import {convertPdfToImage} from "~/lib/pdf2img";
+import {convertPdfToImage, extractTextFromPdf} from "~/lib/pdf2img";
 import {generateUUID} from "~/lib/utils";
-import {prepareInstructions} from "../../constants";
+import {analyzeResumeWithGemini, parseResumeWithGemini, type JobDescription} from "~/lib/ai-features";
 
 const Upload = () => {
-    const { auth, isLoading, fs, ai, kv } = usePuterStore();
+    const { auth, isLoading, fs, kv } = usePuterStore();
     const navigate = useNavigate();
     const [isProcessing, setIsProcessing] = useState(false);
     const [statusText, setStatusText] = useState('');
@@ -18,20 +18,52 @@ const Upload = () => {
         setFile(file)
     }
 
-    const handleAnalyze = async ({ companyName, jobTitle, jobDescription, file }: { companyName: string, jobTitle: string, jobDescription: string, file: File  }) => {
+    const handleAnalyze = async ({ companyName, jobTitle, jobDescription, file }: { companyName: string, jobTitle: string, jobDescription: string, file: File }) => {
         setIsProcessing(true);
 
         setStatusText('Uploading the file...');
         const uploadedFile = await fs.upload([file]);
-        if(!uploadedFile) return setStatusText('Error: Failed to upload file');
+        if(!uploadedFile) {
+            setIsProcessing(false);
+            return setStatusText('Error: Failed to upload file');
+        }
 
         setStatusText('Converting to image...');
         const imageFile = await convertPdfToImage(file);
-        if(!imageFile.file) return setStatusText('Error: Failed to convert PDF to image');
+        if(!imageFile.file) {
+            setIsProcessing(false);
+            return setStatusText('Error: Failed to convert PDF to image');
+        }
 
         setStatusText('Uploading the image...');
         const uploadedImage = await fs.upload([imageFile.file]);
-        if(!uploadedImage) return setStatusText('Error: Failed to upload image');
+        if(!uploadedImage) {
+            setIsProcessing(false);
+            return setStatusText('Error: Failed to upload image');
+        }
+
+        setStatusText('Extracting resume text...');
+        const resumeText = await extractTextFromPdf(file);
+        if (!resumeText) {
+            setIsProcessing(false);
+            return setStatusText('Error: Failed to extract text from resume');
+        }
+
+        setStatusText('Parsing resume data...');
+        const parsedResumeData = await parseResumeWithGemini(resumeText);
+        if (!parsedResumeData) {
+            setIsProcessing(false);
+            return setStatusText('Error: Failed to parse resume. Please check your Gemini API key.');
+        }
+
+        setStatusText('Processing job description...');
+        const jdText = jobDescription;
+        
+        const jobDesc: JobDescription = {
+            title: jobTitle,
+            description: jdText,
+            company: companyName,
+        };
 
         setStatusText('Preparing data...');
         const uuid = generateUUID();
@@ -39,25 +71,53 @@ const Upload = () => {
             id: uuid,
             resumePath: uploadedFile.path,
             imagePath: uploadedImage.path,
-            companyName, jobTitle, jobDescription,
-            feedback: '',
+            companyName, 
+            jobTitle, 
+            jobDescriptionText: jdText,
+            feedback: null as Feedback | null,
+            parsedResumeData: parsedResumeData,
+            jobDescription: jobDesc,
         }
         await kv.set(`resume:${uuid}`, JSON.stringify(data));
 
-        setStatusText('Analyzing...');
+        setStatusText('Analyzing with AI...');
 
-        const feedback = await ai.feedback(
-            uploadedFile.path,
-            prepareInstructions({ jobTitle, jobDescription })
-        )
-        if (!feedback) return setStatusText('Error: Failed to analyze resume');
+        const feedback = await analyzeResumeWithGemini(resumeText, jobDesc);
+        if (!feedback) {
+            setIsProcessing(false);
+            return setStatusText('Error: Failed to analyze resume. Please check your Gemini API key.');
+        }
 
-        const feedbackText = typeof feedback.message.content === 'string'
-            ? feedback.message.content
-            : feedback.message.content[0].text;
-
-        data.feedback = JSON.parse(feedbackText);
+        data.feedback = feedback;
         await kv.set(`resume:${uuid}`, JSON.stringify(data));
+
+        // Calculate ATS scores and save to Firebase
+        if (parsedResumeData) {
+            const atsScore = calculateATSScore(parsedResumeData);
+            const keywordMatch = calculateJDMatch(parsedResumeData, jobDesc);
+            const contentStrength = calculateContentStrength(parsedResumeData);
+            const overallScore = calculateOverallResumeScore(atsScore, keywordMatch.score, contentStrength, 85);
+            const overusedWords = detectOverusedWords(resumeText);
+            const missingSkills = keywordMatch.missing || [];
+
+            // Save ATS analysis record to Firebase
+            await saveATSAnalysisRecord({
+                fullName: parsedResumeData.personalInfo.fullName,
+                email: parsedResumeData.personalInfo.email,
+                jobTitle: jobTitle,
+                companyName: companyName,
+                jobDescription: jdText,
+                overallScore: overallScore,
+                keywordMatch: keywordMatch.score,
+                atsCompatibility: atsScore.overall,
+                contentStrength: contentStrength,
+                lengthScore: 85,
+                missingSkills: missingSkills,
+                overusedWords: overusedWords.map(w => w.word),
+                analyzedAt: Timestamp.now()
+            });
+        }
+
         setStatusText('Analysis complete, redirecting...');
         console.log(data);
         navigate(`/resume/${uuid}`);
@@ -80,7 +140,11 @@ const Upload = () => {
 
     return (
         <main className="bg-[url('/images/bg-main.svg')] bg-cover">
-            <Navbar />
+            <div className="sticky top-0 z-50 bg-gray-100 w-full">
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3">
+                    <Navbar />
+                </div>
+            </div>
 
             <section className="main-section">
                 <div className="page-heading py-16">
@@ -105,12 +169,12 @@ const Upload = () => {
                             </div>
                             <div className="form-div">
                                 <label htmlFor="job-description">Job Description</label>
-                                <textarea rows={5} name="job-description" placeholder="Job Description" id="job-description" />
+                                <textarea rows={5} name="job-description" placeholder="Paste job description here" id="job-description" />
                             </div>
 
                             <div className="form-div">
-                                <label htmlFor="uploader">Upload Resume</label>
-                                <FileUploader onFileSelect={handleFileSelect} />
+                                <label htmlFor="uploader">Upload Resume (PDF)</label>
+                                <FileUploader onFileSelect={handleFileSelect} accept=".pdf" />
                             </div>
 
                             <button className="primary-button" type="submit">

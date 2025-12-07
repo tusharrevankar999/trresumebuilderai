@@ -3,10 +3,12 @@ import {useState, useEffect, useRef} from "react";
 import FileUploader from "~/components/FileUploader";
 import {convertPdfToImage, extractTextFromPdf} from "~/lib/pdf2img";
 import {parseResumeWithGemini} from "~/lib/gemini";
-import AIFeatures from "~/components/AIFeatures";
+import AIFeatures, { AIBulletButtons } from "~/components/AIFeatures";
 import {generateSummary, generateBulletPoints, improveText, quantifyAchievement} from "~/lib/ai-features";
 import jsPDF from "jspdf";
 import html2canvas from "html2canvas";
+import {saveResumeRecord} from "~/lib/firebase";
+import {Timestamp} from "firebase/firestore";
 
 export const meta = () => ([
     { title: 'Resumind | Resume Builder' },
@@ -63,7 +65,7 @@ const Builder = () => {
     const [isConvertingPdf, setIsConvertingPdf] = useState(false);
     const [isParsing, setIsParsing] = useState(false);
     const [professionalResumeImageUrl, setProfessionalResumeImageUrl] = useState<string>('');
-    const [selectedTemplate, setSelectedTemplate] = useState<string>('modern-professional');
+    const [selectedTemplate, setSelectedTemplate] = useState<string>('modern-classic');
     const [activeSection, setActiveSection] = useState<string>('personal');
     const [isExporting, setIsExporting] = useState(false);
     const [showExportMenu, setShowExportMenu] = useState(false);
@@ -425,7 +427,7 @@ const Builder = () => {
     // prefill with a polished sample so the preview looks like the shared screenshot.
     useEffect(() => {
         if (
-            selectedTemplate === 'modern-professional' &&
+            selectedTemplate === 'modern-classic' &&
             !hasFormData() &&
             !uploadedFile &&
             !isConvertingPdf
@@ -631,28 +633,28 @@ const Builder = () => {
 
     const templates = [
         {
-            id: 'modern-professional',
-            name: 'Modern Professional',
-            description: 'Clean and ATS-friendly',
+            id: 'modern-classic',
+            name: 'Modern Classic',
+            description: 'Rezi-style - 100% ATS-safe, Microsoft/Amazon favorite',
             previewBg: 'bg-white'
         },
         {
-            id: 'tech-company',
-            name: 'Tech Company Style',
-            description: 'Colorful accents (Google/Meta)',
-            previewBg: 'bg-gradient-to-r from-blue-100 to-yellow-100'
+            id: 'creative-pro',
+            name: 'Creative Pro',
+            description: 'Apple/Meta style - subtle navy accents, professional',
+            previewBg: 'bg-gradient-to-r from-blue-50 to-indigo-50'
         },
         {
-            id: 'corporate-professional',
-            name: 'Corporate Professional',
-            description: 'Professional blue theme (Microsoft)',
-            previewBg: 'bg-gradient-to-b from-blue-200 to-blue-100'
+            id: 'executive-onepage',
+            name: 'Executive One-Page',
+            description: 'Bold headings, IBM/Accenture style',
+            previewBg: 'bg-gradient-to-b from-slate-50 to-gray-50'
         },
         {
-            id: 'creative-modern',
-            name: 'Creative Modern',
-            description: 'Stand out design',
-            previewBg: 'bg-gradient-to-b from-purple-200 to-purple-100'
+            id: 'minimalist-clean',
+            name: 'Minimalist Clean',
+            description: 'Google/FANG favorite - ultra-clean grayscale',
+            previewBg: 'bg-gradient-to-b from-gray-50 to-white'
         }
     ];
 
@@ -670,37 +672,129 @@ const Builder = () => {
 
     const getTemplateStyles = () => {
         switch (selectedTemplate) {
-            case 'tech-company':
+            case 'creative-pro':
+                // Apple/Meta style - San Francisco/Helvetica, modern spacing, navy accents
                 return {
-                    headerBorder: 'border-b-2 border-blue-400',
-                    headerText: 'text-blue-600',
-                    sectionHeader: 'text-blue-600',
-                    sectionBorder: 'border-blue-600',
-                    accent: 'bg-blue-50'
+                    fontFamily: 'font-sans', // Uses system font stack (SF Pro on Mac, Helvetica)
+                    fontFamilyStyle: { fontFamily: '"Helvetica Neue", Helvetica, Arial, sans-serif' },
+                    headerBorder: 'border-b-2 border-indigo-700',
+                    headerText: 'text-indigo-800',
+                    sectionHeader: 'text-indigo-700',
+                    sectionBorder: 'border-indigo-600',
+                    accent: 'bg-indigo-50',
+                    contactText: 'text-gray-700',
+                    bodyText: 'text-gray-800',
+                    skillBg: 'bg-indigo-100',
+                    skillText: 'text-indigo-800',
+                    nameSize: 'text-3xl',
+                    nameWeight: 'font-semibold',
+                    nameSpacing: 'tracking-tight',
+                    sectionSize: 'text-xs',
+                    sectionWeight: 'font-bold',
+                    sectionLetterSpacing: 'tracking-wider',
+                    bodySize: 'text-sm',
+                    bodyWeight: 'font-normal',
+                    bodyLineHeight: 'leading-relaxed',
+                    borderWidth: 'border-b-2',
+                    containerPadding: 'p-8',
+                    sectionSpacing: 'space-y-4',
+                    itemSpacing: 'space-y-2',
+                    skillLayout: 'flex-wrap', // Single row
+                    contactSize: 'text-xs',
+                    contactSpacing: 'gap-2'
                 };
-            case 'corporate-professional':
+            case 'executive-onepage':
+                // IBM/Accenture style - Times New Roman/Serif, formal, bold headings
                 return {
-                    headerBorder: 'border-b-2 border-blue-600',
-                    headerText: 'text-blue-700',
-                    sectionHeader: 'text-blue-700',
-                    sectionBorder: 'border-blue-700',
-                    accent: 'bg-blue-50'
+                    fontFamily: 'font-serif',
+                    fontFamilyStyle: { fontFamily: '"Merriweather", "Times New Roman", Times, serif' },
+                    headerBorder: 'border-b-4 border-slate-800',
+                    headerText: 'text-slate-900',
+                    sectionHeader: 'text-slate-800',
+                    sectionBorder: 'border-slate-700',
+                    accent: 'bg-slate-100',
+                    contactText: 'text-gray-700',
+                    bodyText: 'text-gray-800',
+                    skillBg: 'bg-slate-200',
+                    skillText: 'text-slate-800',
+                    nameSize: 'text-4xl',
+                    nameWeight: 'font-bold',
+                    nameSpacing: 'tracking-normal',
+                    sectionSize: 'text-sm',
+                    sectionWeight: 'font-bold',
+                    sectionLetterSpacing: 'tracking-wide',
+                    bodySize: 'text-sm',
+                    bodyWeight: 'font-normal',
+                    bodyLineHeight: 'leading-normal',
+                    borderWidth: 'border-b-4',
+                    containerPadding: 'p-10',
+                    sectionSpacing: 'space-y-5',
+                    itemSpacing: 'space-y-3',
+                    skillLayout: 'flex-wrap', // Single row
+                    contactSize: 'text-sm',
+                    contactSpacing: 'gap-3'
                 };
-            case 'creative-modern':
+            case 'minimalist-clean':
+                // Google/FANG favorite - Roboto, ultra-clean, generous spacing
                 return {
-                    headerBorder: 'border-b-2 border-purple-400',
-                    headerText: 'text-purple-600',
-                    sectionHeader: 'text-purple-600',
-                    sectionBorder: 'border-purple-600',
-                    accent: 'bg-purple-50'
-                };
-            default: // modern-professional
-                return {
+                    fontFamily: 'font-sans',
+                    fontFamilyStyle: { fontFamily: '"Roboto", "Open Sans", Arial, sans-serif' },
                     headerBorder: 'border-b border-gray-300',
                     headerText: 'text-gray-900',
+                    sectionHeader: 'text-gray-700',
+                    sectionBorder: 'border-gray-400',
+                    accent: 'bg-white',
+                    contactText: 'text-gray-600',
+                    bodyText: 'text-gray-700',
+                    skillBg: 'bg-gray-100',
+                    skillText: 'text-gray-700',
+                    nameSize: 'text-3xl',
+                    nameWeight: 'font-light',
+                    nameSpacing: 'tracking-wide',
+                    sectionSize: 'text-xs',
+                    sectionWeight: 'font-medium',
+                    sectionLetterSpacing: 'tracking-widest',
+                    bodySize: 'text-sm',
+                    bodyWeight: 'font-light',
+                    bodyLineHeight: 'leading-loose',
+                    borderWidth: 'border-b',
+                    containerPadding: 'p-12',
+                    sectionSpacing: 'space-y-6',
+                    itemSpacing: 'space-y-4',
+                    skillLayout: 'grid grid-cols-2 gap-2', // Two-column for skills
+                    contactSize: 'text-sm',
+                    contactSpacing: 'gap-4'
+                };
+            default: // modern-classic
+                // Microsoft/Amazon style - Arial/Calibri, classic, ATS-optimized
+                return {
+                    fontFamily: 'font-sans',
+                    fontFamilyStyle: { fontFamily: 'Arial, "Helvetica Neue", Helvetica, sans-serif' },
+                    headerBorder: 'border-b-2 border-gray-400',
+                    headerText: 'text-gray-900',
                     sectionHeader: 'text-gray-900',
-                    sectionBorder: 'border-gray-900',
-                    accent: 'bg-gray-50'
+                    sectionBorder: 'border-gray-500',
+                    accent: 'bg-gray-50',
+                    contactText: 'text-gray-700',
+                    bodyText: 'text-gray-800',
+                    skillBg: 'bg-gray-200',
+                    skillText: 'text-gray-800',
+                    nameSize: 'text-3xl',
+                    nameWeight: 'font-bold',
+                    nameSpacing: 'tracking-normal',
+                    sectionSize: 'text-xs',
+                    sectionWeight: 'font-bold',
+                    sectionLetterSpacing: 'tracking-wider',
+                    bodySize: 'text-sm',
+                    bodyWeight: 'font-normal',
+                    bodyLineHeight: 'leading-normal',
+                    borderWidth: 'border-b-2',
+                    containerPadding: 'p-10',
+                    sectionSpacing: 'space-y-5',
+                    itemSpacing: 'space-y-2',
+                    skillLayout: 'flex-wrap', // Single row
+                    contactSize: 'text-sm',
+                    contactSpacing: 'gap-3'
                 };
         }
     };
@@ -1115,8 +1209,35 @@ const Builder = () => {
                 ? `${resumeData.personalInfo.fullName.replace(/\s+/g, '_')}_Resume.pdf`
                 : 'Resume.pdf';
             
-            // Save PDF
+            // Save PDF to user's device
             pdf.save(fileName);
+
+            // Save resume record to Firebase (data only, no file upload)
+            try {
+                const docId = await saveResumeRecord({
+                    fullName: resumeData.personalInfo.fullName,
+                    email: resumeData.personalInfo.email,
+                    phone: resumeData.personalInfo.phone,
+                    location: resumeData.personalInfo.location,
+                    summary: resumeData.summary,
+                    experience: resumeData.experience,
+                    education: resumeData.education,
+                    skills: resumeData.skills,
+                    projects: resumeData.projects,
+                    certifications: resumeData.certifications,
+                    achievements: resumeData.achievements,
+                    template: selectedTemplate,
+                    exportFormat: 'PDF',
+                    downloadedAt: Timestamp.now()
+                });
+                if (docId) {
+                    console.log("✅ Resume saved to Firebase with ID:", docId);
+                } else {
+                    console.warn("⚠️ Failed to save resume to Firebase, but download completed successfully.");
+                }
+            } catch (firebaseError) {
+                console.error("Firebase save error (non-blocking):", firebaseError);
+            }
         } catch (error) {
             console.error('Error exporting PDF:', error);
             alert('Failed to export resume. Please try again.');
@@ -1137,13 +1258,43 @@ const Builder = () => {
             const canvas = await captureResumeAsCanvas();
             const imgData = canvas.toDataURL('image/png');
             
-            // Create download link
-            const link = document.createElement('a');
-            link.download = resumeData.personalInfo.fullName 
+            // Generate filename
+            const fileName = resumeData.personalInfo.fullName 
                 ? `${resumeData.personalInfo.fullName.replace(/\s+/g, '_')}_Resume.png`
                 : 'Resume.png';
+            
+            // Create download link
+            const link = document.createElement('a');
+            link.download = fileName;
             link.href = imgData;
             link.click();
+
+            // Save resume record to Firebase (data only, no file upload)
+            try {
+                const docId = await saveResumeRecord({
+                    fullName: resumeData.personalInfo.fullName,
+                    email: resumeData.personalInfo.email,
+                    phone: resumeData.personalInfo.phone,
+                    location: resumeData.personalInfo.location,
+                    summary: resumeData.summary,
+                    experience: resumeData.experience,
+                    education: resumeData.education,
+                    skills: resumeData.skills,
+                    projects: resumeData.projects,
+                    certifications: resumeData.certifications,
+                    achievements: resumeData.achievements,
+                    template: selectedTemplate,
+                    exportFormat: 'PNG',
+                    downloadedAt: Timestamp.now()
+                });
+                if (docId) {
+                    console.log("✅ Resume saved to Firebase with ID:", docId);
+                } else {
+                    console.warn("⚠️ Failed to save resume to Firebase, but download completed successfully.");
+                }
+            } catch (firebaseError) {
+                console.error("Firebase save error (non-blocking):", firebaseError);
+            }
         } catch (error) {
             console.error('Error exporting PNG:', error);
             alert('Failed to export resume. Please try again.');
@@ -1164,13 +1315,43 @@ const Builder = () => {
             const canvas = await captureResumeAsCanvas();
             const imgData = canvas.toDataURL('image/jpeg', 0.95);
             
-            // Create download link
-            const link = document.createElement('a');
-            link.download = resumeData.personalInfo.fullName 
+            // Generate filename
+            const fileName = resumeData.personalInfo.fullName 
                 ? `${resumeData.personalInfo.fullName.replace(/\s+/g, '_')}_Resume.jpg`
                 : 'Resume.jpg';
+            
+            // Create download link
+            const link = document.createElement('a');
+            link.download = fileName;
             link.href = imgData;
             link.click();
+
+            // Save resume record to Firebase (data only, no file upload)
+            try {
+                const docId = await saveResumeRecord({
+                    fullName: resumeData.personalInfo.fullName,
+                    email: resumeData.personalInfo.email,
+                    phone: resumeData.personalInfo.phone,
+                    location: resumeData.personalInfo.location,
+                    summary: resumeData.summary,
+                    experience: resumeData.experience,
+                    education: resumeData.education,
+                    skills: resumeData.skills,
+                    projects: resumeData.projects,
+                    certifications: resumeData.certifications,
+                    achievements: resumeData.achievements,
+                    template: selectedTemplate,
+                    exportFormat: 'JPG',
+                    downloadedAt: Timestamp.now()
+                });
+                if (docId) {
+                    console.log("✅ Resume saved to Firebase with ID:", docId);
+                } else {
+                    console.warn("⚠️ Failed to save resume to Firebase, but download completed successfully.");
+                }
+            } catch (firebaseError) {
+                console.error("Firebase save error (non-blocking):", firebaseError);
+            }
         } catch (error) {
             console.error('Error exporting JPG:', error);
             alert('Failed to export resume. Please try again.');
@@ -1237,16 +1418,46 @@ const Builder = () => {
                 </html>
             `;
             
+            // Generate filename
+            const fileName = resumeData.personalInfo.fullName 
+                ? `${resumeData.personalInfo.fullName.replace(/\s+/g, '_')}_Resume.doc`
+                : 'Resume.doc';
+            
             // Create blob and download
             const blob = new Blob(['\ufeff', htmlContent], { type: 'application/msword' });
             const url = URL.createObjectURL(blob);
             const link = document.createElement('a');
             link.href = url;
-            link.download = resumeData.personalInfo.fullName 
-                ? `${resumeData.personalInfo.fullName.replace(/\s+/g, '_')}_Resume.doc`
-                : 'Resume.doc';
+            link.download = fileName;
             link.click();
             URL.revokeObjectURL(url);
+
+            // Save resume record to Firebase (data only, no file upload)
+            try {
+                const docId = await saveResumeRecord({
+                    fullName: resumeData.personalInfo.fullName,
+                    email: resumeData.personalInfo.email,
+                    phone: resumeData.personalInfo.phone,
+                    location: resumeData.personalInfo.location,
+                    summary: resumeData.summary,
+                    experience: resumeData.experience,
+                    education: resumeData.education,
+                    skills: resumeData.skills,
+                    projects: resumeData.projects,
+                    certifications: resumeData.certifications,
+                    achievements: resumeData.achievements,
+                    template: selectedTemplate,
+                    exportFormat: 'DOC',
+                    downloadedAt: Timestamp.now()
+                });
+                if (docId) {
+                    console.log("✅ Resume saved to Firebase with ID:", docId);
+                } else {
+                    console.warn("⚠️ Failed to save resume to Firebase, but download completed successfully.");
+                }
+            } catch (firebaseError) {
+                console.error("Firebase save error (non-blocking):", firebaseError);
+            }
         } catch (error) {
             console.error('Error exporting DOC:', error);
             alert('Failed to export resume. Please try again.');
@@ -1630,26 +1841,13 @@ const Builder = () => {
                                                         rows={3}
                                                         className="mb-1"
                                                     />
-                                                    <div className="flex gap-2">
-                                                        <button
-                                                            onClick={async () => {
-                                                                const improved = await improveText(desc);
-                                                                if (improved) updateExperienceDescription(index, descIndex, improved);
-                                                            }}
-                                                            className="px-2 py-1 bg-gray-100 text-gray-700 rounded text-xs hover:bg-gray-200"
-                                                        >
-                                                            ✏️ Improve
-                                                        </button>
-                                                        <button
-                                                            onClick={async () => {
-                                                                const quantified = await quantifyAchievement(desc);
-                                                                if (quantified) updateExperienceDescription(index, descIndex, quantified);
-                                                            }}
-                                                            className="px-2 py-1 bg-gray-100 text-gray-700 rounded text-xs hover:bg-gray-200"
-                                                        >
-                                                            📊 Quantify
-                                                        </button>
-                                                    </div>
+                                                    <AIBulletButtons
+                                                        expIndex={index}
+                                                        descIndex={descIndex}
+                                                        text={desc}
+                                                        onUpdate={(newText) => updateExperienceDescription(index, descIndex, newText)}
+                                                        isGenerating={false}
+                                                    />
                                                 </div>
                                             ))}
                                             <button
@@ -1885,6 +2083,12 @@ const Builder = () => {
                                         }));
                                     }}
                                     onDescriptionUpdate={updateExperienceDescription}
+                                    onSkillsUpdate={(skills) => {
+                                        setResumeData(prev => ({
+                                            ...prev,
+                                            skills
+                                        }));
+                                    }}
                                 />
                             </div>
                         )}
@@ -2086,14 +2290,22 @@ const Builder = () => {
                                         <div className="form-div">
                                             <label>Description</label>
                                             {exp.description.map((desc, descIndex) => (
-                                                <textarea
-                                                    key={descIndex}
-                                                    value={desc}
-                                                    onChange={(e) => updateExperienceDescription(index, descIndex, e.target.value)}
-                                                    placeholder="Describe your responsibilities..."
-                                                    rows={2}
-                                                    className="mb-2"
-                                                />
+                                                <div key={descIndex} className="mb-3">
+                                                    <textarea
+                                                        value={desc}
+                                                        onChange={(e) => updateExperienceDescription(index, descIndex, e.target.value)}
+                                                        placeholder="Describe your responsibilities..."
+                                                        rows={2}
+                                                        className="mb-2"
+                                                    />
+                                                    <AIBulletButtons
+                                                        expIndex={index}
+                                                        descIndex={descIndex}
+                                                        text={desc}
+                                                        onUpdate={(newText) => updateExperienceDescription(index, descIndex, newText)}
+                                                        isGenerating={false}
+                                                    />
+                                                </div>
                                             ))}
                                             <button
                                                 onClick={() => addExperienceDescription(index)}
@@ -2353,14 +2565,14 @@ const Builder = () => {
                             </div>
                         ) : hasFormData() ? (
                             // Show template-based resume when form has data (from extraction or manual entry)
-                            <div ref={resumePreviewRef} className="gradient-border max-w-4xl w-full bg-white rounded-2xl shadow-xl">
-                                <div className="p-10 space-y-5">
+                            <div ref={resumePreviewRef} className="gradient-border max-w-4xl w-full bg-white rounded-2xl shadow-xl" style={templateStyles.fontFamilyStyle}>
+                                <div className={`${templateStyles.containerPadding} ${templateStyles.sectionSpacing}`}>
                                 {/* Name and Contact */}
-                                <div className="pb-3">
-                                    <h1 className={`text-3xl font-bold ${templateStyles.headerText} mb-3`}>
+                                <div className={`pb-3 ${templateStyles.headerBorder}`}>
+                                    <h1 className={`${templateStyles.nameSize} ${templateStyles.nameWeight} ${templateStyles.nameSpacing} ${templateStyles.headerText} mb-3`}>
                                         {resumeData.personalInfo.fullName || 'Your Name'}
                                     </h1>
-                                    <div className="flex flex-wrap items-center gap-3 text-sm text-gray-700">
+                                    <div className={`flex flex-wrap items-center ${templateStyles.contactSpacing} ${templateStyles.contactSize} ${templateStyles.contactText}`}>
                                         {resumeData.personalInfo.email && (
                                             <div className="flex items-center gap-1.5">
                                                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -2408,40 +2620,40 @@ const Builder = () => {
                                 {/* Professional Summary */}
                                 {resumeData.summary && (
                             <div>
-                                        <h2 className={`text-xs font-bold ${templateStyles.sectionHeader} mb-2 uppercase border-b ${templateStyles.sectionBorder} pb-1`}>PROFESSIONAL SUMMARY</h2>
-                                        <p className="text-sm text-gray-700 leading-relaxed mt-2">{resumeData.summary}</p>
+                                        <h2 className={`${templateStyles.sectionSize} font-bold ${templateStyles.sectionHeader} mb-2 uppercase ${templateStyles.borderWidth} ${templateStyles.sectionBorder} pb-1`}>PROFESSIONAL SUMMARY</h2>
+                                        <p className={`text-sm ${templateStyles.bodyText} leading-relaxed mt-2`}>{resumeData.summary}</p>
                                     </div>
                                 )}
 
                                 {/* Experience */}
                                 {resumeData.experience.length > 0 && resumeData.experience[0].company && (
                                 <div>
-                                        <h2 className={`text-xs font-bold ${templateStyles.sectionHeader} mb-3 uppercase border-b ${templateStyles.sectionBorder} pb-1`}>EXPERIENCE</h2>
+                                        <h2 className={`${templateStyles.sectionSize} font-bold ${templateStyles.sectionHeader} mb-3 uppercase ${templateStyles.borderWidth} ${templateStyles.sectionBorder} pb-1`}>EXPERIENCE</h2>
                                         <div className="space-y-4 mt-3">
                                             {resumeData.experience.map((exp, index) => (
                                                 <div key={index} className="mb-3">
                                                     <div className="flex justify-between items-start mb-1">
                             <div>
-                                                            <p className="font-bold text-sm text-gray-900">
+                                                            <p className={`font-bold text-sm ${templateStyles.headerText}`}>
                                                                 {exp.position || 'Position'}
                                                             </p>
-                                                            <p className="text-sm text-gray-700 font-medium">
+                                                            <p className={`text-sm ${templateStyles.bodyText} font-medium`}>
                                                                 {exp.company}
                                     </p>
                                 </div>
                                                         <div className="text-right">
                                                             {(exp.startDate || exp.endDate) && (
-                                                                <p className="text-sm text-gray-600">
+                                                                <p className={`text-sm ${templateStyles.contactText}`}>
                                                                     {exp.startDate} - {exp.endDate}
                                                                 </p>
                                                             )}
                                                             {exp.location && (
-                                                                <p className="text-sm text-gray-600">{exp.location}</p>
+                                                                <p className={`text-sm ${templateStyles.contactText}`}>{exp.location}</p>
                                                             )}
                             </div>
                                                     </div>
                                                     {exp.description.filter(d => d).length > 0 && (
-                                                        <ul className="list-disc list-inside text-sm text-gray-700 space-y-0.5 mt-1.5 ml-2">
+                                                        <ul className={`list-disc list-inside text-sm ${templateStyles.bodyText} space-y-0.5 mt-1.5 ml-2`}>
                                                             {exp.description.filter(d => d).map((desc, descIndex) => (
                                                                 <li key={descIndex}>{desc}</li>
                                                             ))}
@@ -2456,15 +2668,15 @@ const Builder = () => {
                                 {/* Projects */}
                                 {resumeData.projects.length > 0 && resumeData.projects[0].name && (
                                     <div>
-                                        <h2 className={`text-xs font-bold ${templateStyles.sectionHeader} mb-3 uppercase border-b ${templateStyles.sectionBorder} pb-1`}>PROJECTS</h2>
+                                        <h2 className={`${templateStyles.sectionSize} font-bold ${templateStyles.sectionHeader} mb-3 uppercase ${templateStyles.borderWidth} ${templateStyles.sectionBorder} pb-1`}>PROJECTS</h2>
                                         <div className="space-y-3 mt-3">
                                             {resumeData.projects.map((project, index) => (
                                                 <div key={index}>
-                                                    <h3 className="font-bold text-sm text-gray-900 mb-1">
+                                                    <h3 className={`font-bold text-sm ${templateStyles.headerText} mb-1`}>
                                                         {project.name}
                                                     </h3>
                                                     {project.description && (
-                                                        <p className="text-sm text-gray-700">{project.description}</p>
+                                                        <p className={`text-sm ${templateStyles.bodyText}`}>{project.description}</p>
                                                     )}
                                                 </div>
                                             ))}
@@ -2475,24 +2687,24 @@ const Builder = () => {
                             {/* Education */}
                                 {resumeData.education.length > 0 && resumeData.education[0].degree && (
                             <div>
-                                        <h2 className={`text-xs font-bold ${templateStyles.sectionHeader} mb-3 uppercase border-b ${templateStyles.sectionBorder} pb-1`}>EDUCATION</h2>
+                                        <h2 className={`${templateStyles.sectionSize} font-bold ${templateStyles.sectionHeader} mb-3 uppercase ${templateStyles.borderWidth} ${templateStyles.sectionBorder} pb-1`}>EDUCATION</h2>
                                         <div className="space-y-3 mt-3">
                                             {resumeData.education.map((edu, index) => (
                                                 <div key={index} className="flex justify-between items-start">
                                     <div>
-                                                        <p className="font-bold text-sm text-gray-900">
+                                                        <p className={`font-bold text-sm ${templateStyles.headerText}`}>
                                                             {edu.degree}
                                                         </p>
-                                                        <p className="text-sm text-gray-700 font-medium">
+                                                        <p className={`text-sm ${templateStyles.bodyText} font-medium`}>
                                                             {edu.school}
                                                         </p>
                                     </div>
                                     <div className="text-right">
                                                         {edu.graduationDate && (
-                                                            <p className="text-sm text-gray-600">{edu.graduationDate}</p>
+                                                            <p className={`text-sm ${templateStyles.contactText}`}>{edu.graduationDate}</p>
                                                         )}
                                                         {edu.gpa && (
-                                                            <p className="text-sm text-gray-600">GPA: {edu.gpa}</p>
+                                                            <p className={`text-sm ${templateStyles.contactText}`}>GPA: {edu.gpa}</p>
                                                         )}
                                     </div>
                                 </div>
@@ -2504,14 +2716,14 @@ const Builder = () => {
                                 {/* Skills */}
                                 {(resumeData.skills.technical.length > 0 && resumeData.skills.technical[0]) || (resumeData.skills.soft.length > 0 && resumeData.skills.soft[0]) ? (
                             <div>
-                                        <h2 className={`text-xs font-bold ${templateStyles.sectionHeader} mb-3 uppercase border-b ${templateStyles.sectionBorder} pb-1`}>SKILLS</h2>
+                                        <h2 className={`${templateStyles.sectionSize} font-bold ${templateStyles.sectionHeader} mb-3 uppercase ${templateStyles.borderWidth} ${templateStyles.sectionBorder} pb-1`}>SKILLS</h2>
                                         <div className="mt-3 space-y-3">
                                             {resumeData.skills.technical.filter(s => s).length > 0 && (
                                                 <div>
-                                                    <p className="font-semibold text-sm text-gray-900 mb-1">Technical</p>
+                                                    <p className={`font-semibold text-sm ${templateStyles.headerText} mb-1`}>Technical</p>
                                 <div className="flex flex-wrap gap-2">
                                                         {resumeData.skills.technical.filter(s => s).map((skill, index) => (
-                                                            <span key={index} className="px-3 py-1 bg-gray-100 text-sm text-gray-700 rounded">
+                                                            <span key={index} className={`px-3 py-1 ${templateStyles.skillBg} text-sm ${templateStyles.skillText} rounded`}>
                                             {skill}
                                         </span>
                                     ))}
@@ -2520,10 +2732,10 @@ const Builder = () => {
                                             )}
                                             {resumeData.skills.soft.filter(s => s).length > 0 && (
                             <div>
-                                                    <p className="font-semibold text-sm text-gray-900 mb-1">Soft Skills</p>
+                                                    <p className={`font-semibold text-sm ${templateStyles.headerText} mb-1`}>Soft Skills</p>
                                 <div className="flex flex-wrap gap-2">
                                                         {resumeData.skills.soft.filter(s => s).map((skill, index) => (
-                                                            <span key={index} className="px-3 py-1 bg-gray-100 text-sm text-gray-700 rounded">
+                                                            <span key={index} className={`px-3 py-1 ${templateStyles.skillBg} text-sm ${templateStyles.skillText} rounded`}>
                                             {skill}
                                         </span>
                                     ))}
@@ -2537,10 +2749,10 @@ const Builder = () => {
                                 {/* Certifications */}
                                 {resumeData.certifications.length > 0 && resumeData.certifications[0].name && (
                                     <div>
-                                        <h2 className={`text-xs font-bold ${templateStyles.sectionHeader} mb-3 uppercase border-b ${templateStyles.sectionBorder} pb-1`}>CERTIFICATIONS</h2>
+                                        <h2 className={`${templateStyles.sectionSize} font-bold ${templateStyles.sectionHeader} mb-3 uppercase ${templateStyles.borderWidth} ${templateStyles.sectionBorder} pb-1`}>CERTIFICATIONS</h2>
                                         <div className="space-y-1 mt-3">
                                             {resumeData.certifications.filter(c => c.name).map((cert, index) => (
-                                                <p key={index} className="text-sm text-gray-700">{cert.name}</p>
+                                                <p key={index} className={`text-sm ${templateStyles.bodyText}`}>{cert.name}</p>
                                             ))}
                                         </div>
                                     </div>
@@ -2549,10 +2761,10 @@ const Builder = () => {
                                 {/* Achievements */}
                                 {resumeData.achievements.length > 0 && resumeData.achievements[0].name && (
                                     <div>
-                                        <h2 className={`text-xs font-bold ${templateStyles.sectionHeader} mb-3 uppercase border-b ${templateStyles.sectionBorder} pb-1`}>ACHIEVEMENTS</h2>
+                                        <h2 className={`${templateStyles.sectionSize} font-bold ${templateStyles.sectionHeader} mb-3 uppercase ${templateStyles.borderWidth} ${templateStyles.sectionBorder} pb-1`}>ACHIEVEMENTS</h2>
                                         <div className="space-y-1 mt-3">
                                             {resumeData.achievements.filter(a => a.name).map((ach, index) => (
-                                                <p key={index} className="text-sm text-gray-700">{ach.name}</p>
+                                                <p key={index} className={`text-sm ${templateStyles.bodyText}`}>{ach.name}</p>
                                             ))}
                                         </div>
                                     </div>
@@ -2571,7 +2783,7 @@ const Builder = () => {
                                     />
                                 </a>
                             </div>
-                        ) : selectedTemplate === 'modern-professional' && !resumeImageUrl && !hasFormData() && professionalResumeImageUrl ? (
+                        ) : !resumeImageUrl && !hasFormData() && professionalResumeImageUrl ? (
                             <div className="animate-in fade-in duration-1000 gradient-border max-sm:m-0 w-full max-w-6xl my-auto">
                                 <a href="/images/Professional CV Resume.pdf" target="_blank" rel="noopener noreferrer" className="block w-full">
                                     <img
@@ -2582,14 +2794,14 @@ const Builder = () => {
                                 </a>
                             </div>
                         ) : (
-                            <div ref={resumePreviewRef} className="gradient-border max-w-4xl w-full bg-white rounded-2xl shadow-xl">
-                                <div className="p-10 space-y-5">
+                            <div ref={resumePreviewRef} className="gradient-border max-w-4xl w-full bg-white rounded-2xl shadow-xl" style={templateStyles.fontFamilyStyle}>
+                                <div className={`${templateStyles.containerPadding} ${templateStyles.sectionSpacing}`}>
                                 {/* Name and Contact */}
-                                <div className="pb-3">
-                                    <h1 className={`text-3xl font-bold ${templateStyles.headerText} mb-3`}>
+                                <div className={`pb-3 ${templateStyles.headerBorder}`}>
+                                    <h1 className={`${templateStyles.nameSize} ${templateStyles.nameWeight} ${templateStyles.nameSpacing} ${templateStyles.headerText} mb-3`}>
                                         {resumeData.personalInfo.fullName || 'Your Name'}
                                     </h1>
-                                    <div className="flex flex-wrap items-center gap-3 text-sm text-gray-700">
+                                    <div className={`flex flex-wrap items-center ${templateStyles.contactSpacing} ${templateStyles.contactSize} ${templateStyles.contactText}`}>
                                         {resumeData.personalInfo.email && (
                                             <div className="flex items-center gap-1.5">
                                                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -2637,40 +2849,40 @@ const Builder = () => {
                                 {/* Professional Summary */}
                                 {resumeData.summary && (
                             <div>
-                                        <h2 className={`text-xs font-bold ${templateStyles.sectionHeader} mb-2 uppercase border-b ${templateStyles.sectionBorder} pb-1`}>PROFESSIONAL SUMMARY</h2>
-                                        <p className="text-sm text-gray-700 leading-relaxed mt-2">{resumeData.summary}</p>
+                                        <h2 className={`${templateStyles.sectionSize} font-bold ${templateStyles.sectionHeader} mb-2 uppercase ${templateStyles.borderWidth} ${templateStyles.sectionBorder} pb-1`}>PROFESSIONAL SUMMARY</h2>
+                                        <p className={`text-sm ${templateStyles.bodyText} leading-relaxed mt-2`}>{resumeData.summary}</p>
                                     </div>
                                 )}
 
                                 {/* Experience */}
                                 {resumeData.experience.length > 0 && resumeData.experience[0].company && (
                                 <div>
-                                        <h2 className={`text-xs font-bold ${templateStyles.sectionHeader} mb-3 uppercase border-b ${templateStyles.sectionBorder} pb-1`}>EXPERIENCE</h2>
+                                        <h2 className={`${templateStyles.sectionSize} font-bold ${templateStyles.sectionHeader} mb-3 uppercase ${templateStyles.borderWidth} ${templateStyles.sectionBorder} pb-1`}>EXPERIENCE</h2>
                                         <div className="space-y-4 mt-3">
                                             {resumeData.experience.map((exp, index) => (
                                                 <div key={index} className="mb-3">
                                                     <div className="flex justify-between items-start mb-1">
                             <div>
-                                                            <p className="font-bold text-sm text-gray-900">
+                                                            <p className={`font-bold text-sm ${templateStyles.headerText}`}>
                                                                 {exp.position || 'Position'}
                                                             </p>
-                                                            <p className="text-sm text-gray-700 font-medium">
+                                                            <p className={`text-sm ${templateStyles.bodyText} font-medium`}>
                                                                 {exp.company}
                                     </p>
                                 </div>
                                                         <div className="text-right">
                                                             {(exp.startDate || exp.endDate) && (
-                                                                <p className="text-sm text-gray-600">
+                                                                <p className={`text-sm ${templateStyles.contactText}`}>
                                                                     {exp.startDate} - {exp.endDate}
                                                                 </p>
                                                             )}
                                                             {exp.location && (
-                                                                <p className="text-sm text-gray-600">{exp.location}</p>
+                                                                <p className={`text-sm ${templateStyles.contactText}`}>{exp.location}</p>
                                                             )}
                             </div>
                                                     </div>
                                                     {exp.description.filter(d => d).length > 0 && (
-                                                        <ul className="list-disc list-inside text-sm text-gray-700 space-y-0.5 mt-1.5 ml-2">
+                                                        <ul className={`list-disc list-inside text-sm ${templateStyles.bodyText} space-y-0.5 mt-1.5 ml-2`}>
                                                             {exp.description.filter(d => d).map((desc, descIndex) => (
                                                                 <li key={descIndex}>{desc}</li>
                                                             ))}
@@ -2685,15 +2897,15 @@ const Builder = () => {
                                 {/* Projects */}
                                 {resumeData.projects.length > 0 && resumeData.projects[0].name && (
                                     <div>
-                                        <h2 className={`text-xs font-bold ${templateStyles.sectionHeader} mb-3 uppercase border-b ${templateStyles.sectionBorder} pb-1`}>PROJECTS</h2>
+                                        <h2 className={`${templateStyles.sectionSize} font-bold ${templateStyles.sectionHeader} mb-3 uppercase ${templateStyles.borderWidth} ${templateStyles.sectionBorder} pb-1`}>PROJECTS</h2>
                                         <div className="space-y-3 mt-3">
                                             {resumeData.projects.map((project, index) => (
                                                 <div key={index}>
-                                                    <h3 className="font-bold text-sm text-gray-900 mb-1">
+                                                    <h3 className={`font-bold text-sm ${templateStyles.headerText} mb-1`}>
                                                         {project.name}
                                                     </h3>
                                                     {project.description && (
-                                                        <p className="text-sm text-gray-700">{project.description}</p>
+                                                        <p className={`text-sm ${templateStyles.bodyText}`}>{project.description}</p>
                                                     )}
                                                 </div>
                                             ))}
@@ -2704,24 +2916,24 @@ const Builder = () => {
                             {/* Education */}
                                 {resumeData.education.length > 0 && resumeData.education[0].degree && (
                             <div>
-                                        <h2 className={`text-xs font-bold ${templateStyles.sectionHeader} mb-3 uppercase border-b ${templateStyles.sectionBorder} pb-1`}>EDUCATION</h2>
+                                        <h2 className={`${templateStyles.sectionSize} font-bold ${templateStyles.sectionHeader} mb-3 uppercase ${templateStyles.borderWidth} ${templateStyles.sectionBorder} pb-1`}>EDUCATION</h2>
                                         <div className="space-y-3 mt-3">
                                             {resumeData.education.map((edu, index) => (
                                                 <div key={index} className="flex justify-between items-start">
                                     <div>
-                                                        <p className="font-bold text-sm text-gray-900">
+                                                        <p className={`font-bold text-sm ${templateStyles.headerText}`}>
                                                             {edu.degree}
                                                         </p>
-                                                        <p className="text-sm text-gray-700 font-medium">
+                                                        <p className={`text-sm ${templateStyles.bodyText} font-medium`}>
                                                             {edu.school}
                                                         </p>
                                     </div>
                                     <div className="text-right">
                                                         {edu.graduationDate && (
-                                                            <p className="text-sm text-gray-600">{edu.graduationDate}</p>
+                                                            <p className={`text-sm ${templateStyles.contactText}`}>{edu.graduationDate}</p>
                                                         )}
                                                         {edu.gpa && (
-                                                            <p className="text-sm text-gray-600">GPA: {edu.gpa}</p>
+                                                            <p className={`text-sm ${templateStyles.contactText}`}>GPA: {edu.gpa}</p>
                                                         )}
                                     </div>
                                 </div>
@@ -2733,14 +2945,14 @@ const Builder = () => {
                                 {/* Skills */}
                                 {(resumeData.skills.technical.length > 0 && resumeData.skills.technical[0]) || (resumeData.skills.soft.length > 0 && resumeData.skills.soft[0]) ? (
                             <div>
-                                        <h2 className={`text-xs font-bold ${templateStyles.sectionHeader} mb-3 uppercase border-b ${templateStyles.sectionBorder} pb-1`}>SKILLS</h2>
+                                        <h2 className={`${templateStyles.sectionSize} font-bold ${templateStyles.sectionHeader} mb-3 uppercase ${templateStyles.borderWidth} ${templateStyles.sectionBorder} pb-1`}>SKILLS</h2>
                                         <div className="mt-3 space-y-3">
                                             {resumeData.skills.technical.filter(s => s).length > 0 && (
                                                 <div>
-                                                    <p className="font-semibold text-sm text-gray-900 mb-1">Technical</p>
+                                                    <p className={`font-semibold text-sm ${templateStyles.headerText} mb-1`}>Technical</p>
                                 <div className="flex flex-wrap gap-2">
                                                         {resumeData.skills.technical.filter(s => s).map((skill, index) => (
-                                                            <span key={index} className="px-3 py-1 bg-gray-100 text-sm text-gray-700 rounded">
+                                                            <span key={index} className={`px-3 py-1 ${templateStyles.skillBg} text-sm ${templateStyles.skillText} rounded`}>
                                             {skill}
                                         </span>
                                     ))}
@@ -2749,10 +2961,10 @@ const Builder = () => {
                                             )}
                                             {resumeData.skills.soft.filter(s => s).length > 0 && (
                             <div>
-                                                    <p className="font-semibold text-sm text-gray-900 mb-1">Soft Skills</p>
+                                                    <p className={`font-semibold text-sm ${templateStyles.headerText} mb-1`}>Soft Skills</p>
                                 <div className="flex flex-wrap gap-2">
                                                         {resumeData.skills.soft.filter(s => s).map((skill, index) => (
-                                                            <span key={index} className="px-3 py-1 bg-gray-100 text-sm text-gray-700 rounded">
+                                                            <span key={index} className={`px-3 py-1 ${templateStyles.skillBg} text-sm ${templateStyles.skillText} rounded`}>
                                             {skill}
                                         </span>
                                     ))}
@@ -2766,10 +2978,10 @@ const Builder = () => {
                                 {/* Certifications */}
                                 {resumeData.certifications.length > 0 && resumeData.certifications[0].name && (
                                     <div>
-                                        <h2 className={`text-xs font-bold ${templateStyles.sectionHeader} mb-3 uppercase border-b ${templateStyles.sectionBorder} pb-1`}>CERTIFICATIONS</h2>
+                                        <h2 className={`${templateStyles.sectionSize} font-bold ${templateStyles.sectionHeader} mb-3 uppercase ${templateStyles.borderWidth} ${templateStyles.sectionBorder} pb-1`}>CERTIFICATIONS</h2>
                                         <div className="space-y-1 mt-3">
                                             {resumeData.certifications.filter(c => c.name).map((cert, index) => (
-                                                <p key={index} className="text-sm text-gray-700">{cert.name}</p>
+                                                <p key={index} className={`text-sm ${templateStyles.bodyText}`}>{cert.name}</p>
                                             ))}
                                         </div>
                                     </div>
@@ -2778,10 +2990,10 @@ const Builder = () => {
                                 {/* Achievements */}
                                 {resumeData.achievements.length > 0 && resumeData.achievements[0].name && (
                                     <div>
-                                        <h2 className={`text-xs font-bold ${templateStyles.sectionHeader} mb-3 uppercase border-b ${templateStyles.sectionBorder} pb-1`}>ACHIEVEMENTS</h2>
+                                        <h2 className={`${templateStyles.sectionSize} font-bold ${templateStyles.sectionHeader} mb-3 uppercase ${templateStyles.borderWidth} ${templateStyles.sectionBorder} pb-1`}>ACHIEVEMENTS</h2>
                                         <div className="space-y-1 mt-3">
                                             {resumeData.achievements.filter(a => a.name).map((ach, index) => (
-                                                <p key={index} className="text-sm text-gray-700">{ach.name}</p>
+                                                <p key={index} className={`text-sm ${templateStyles.bodyText}`}>{ach.name}</p>
                                             ))}
                                         </div>
                                     </div>

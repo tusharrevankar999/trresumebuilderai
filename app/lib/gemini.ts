@@ -55,14 +55,6 @@ export async function parseResumeWithGemini(
     apiKey?: string
 ): Promise<ParsedResumeData | null> {
     try {
-        // Get API key from parameter, env var, or use a default (user should set their own)
-        const key = apiKey || import.meta.env.VITE_GEMINI_API_KEY || '';
-        
-        if (!key) {
-            console.warn('Gemini API key not found. Falling back to basic parsing.');
-            return null;
-        }
-
         const prompt = `You are an expert at parsing resumes. Extract all information from the following resume text and return it as a JSON object with this exact structure:
 
 {
@@ -121,41 +113,43 @@ ${text}
 
 Return ONLY valid JSON, no markdown, no code blocks, no explanations. If a field is not found, use an empty string or empty array.`;
 
-        // Use gemini-2.5-pro
-        const response = await fetch(
-            `https://generativelanguage.googleapis.com/v1/models/gemini-2.5-pro:generateContent?key=${key}`,
-            {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    contents: [
-                        {
-                            parts: [
-                                {
-                                    text: prompt,
-                                },
-                            ],
-                        },
-                    ],
-                }),
-            }
-        );
+        // Call Hugging Face AI API through server-side proxy (avoids CORS)
+        const hfModel = 'meta-llama/Meta-Llama-3-8B-Instruct';
+        
+        const response = await fetch('/api/ai', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                prompt,
+                model: hfModel,
+            }),
+        });
 
         if (!response.ok) {
-            const errorText = await response.text();
-            console.error('Gemini API error:', errorText);
+            const errorData = await response.json();
+            const errorMessage = errorData.error || 'Unknown error';
+            
+            console.error('Hugging Face API error:', errorMessage);
+            
+            // Provide helpful error messages
+            if (errorMessage.includes('loading')) {
+                console.warn('⚠️ Model is loading. This may take 20-30 seconds on first request.');
+            } else if (errorMessage.includes('rate limit')) {
+                console.warn('⚠️ Rate limit exceeded. Please wait a moment and try again.');
+            }
+            
             return null;
         }
 
         const data = await response.json();
         
         if (!data.candidates || !data.candidates[0] || !data.candidates[0].content) {
-            console.error('Invalid response from Gemini API');
+            console.error('Invalid response from Hugging Face API');
             return null;
         }
-
+        
         const content = data.candidates[0].content.parts[0].text;
         
         // Extract JSON from response (remove markdown code blocks if present)
@@ -167,32 +161,64 @@ Return ONLY valid JSON, no markdown, no code blocks, no explanations. If a field
         }
 
         const parsed = JSON.parse(jsonText) as ParsedResumeData;
-        
-        // Validate and clean the parsed data
-        return {
-            personalInfo: {
-                fullName: parsed.personalInfo?.fullName || '',
-                email: parsed.personalInfo?.email || '',
-                phone: parsed.personalInfo?.phone || '',
-                location: parsed.personalInfo?.location || '',
-                linkedin: parsed.personalInfo?.linkedin || '',
-                portfolio: parsed.personalInfo?.portfolio || '',
-            },
-            summary: parsed.summary || '',
-            experience: Array.isArray(parsed.experience) ? parsed.experience : [],
-            education: Array.isArray(parsed.education) ? parsed.education : [],
-            skills: {
-                technical: Array.isArray(parsed.skills?.technical) ? parsed.skills.technical : [],
-                soft: Array.isArray(parsed.skills?.soft) ? parsed.skills.soft : [],
-            },
-            projects: Array.isArray(parsed.projects) ? parsed.projects : [],
-            certifications: Array.isArray(parsed.certifications) ? parsed.certifications : [],
-            achievements: Array.isArray(parsed.achievements) ? parsed.achievements : [],
-        };
+        return validateAndCleanParsedData(parsed);
 
     } catch (error) {
-        console.error('Error parsing resume with Gemini:', error);
+        console.error('Error parsing resume with Hugging Face:', error);
         return null;
     }
+}
+
+/**
+ * Format Hugging Face response to match expected format
+ */
+function formatHuggingFaceResponse(data: any): any {
+    let text = '';
+    
+    if (Array.isArray(data)) {
+        text = data[0]?.generated_text || data[0]?.text || '';
+    } else if (data.generated_text) {
+        text = data.generated_text;
+    } else if (data[0]?.generated_text) {
+        text = data[0].generated_text;
+    } else if (typeof data === 'string') {
+        text = data;
+    }
+
+    return {
+        candidates: [{
+            content: {
+                parts: [{
+                    text: text.trim()
+                }]
+            }
+        }]
+    };
+}
+
+/**
+ * Validate and clean parsed resume data
+ */
+function validateAndCleanParsedData(parsed: ParsedResumeData): ParsedResumeData {
+    return {
+        personalInfo: {
+            fullName: parsed.personalInfo?.fullName || '',
+            email: parsed.personalInfo?.email || '',
+            phone: parsed.personalInfo?.phone || '',
+            location: parsed.personalInfo?.location || '',
+            linkedin: parsed.personalInfo?.linkedin || '',
+            portfolio: parsed.personalInfo?.portfolio || '',
+        },
+        summary: parsed.summary || '',
+        experience: Array.isArray(parsed.experience) ? parsed.experience : [],
+        education: Array.isArray(parsed.education) ? parsed.education : [],
+        skills: {
+            technical: Array.isArray(parsed.skills?.technical) ? parsed.skills.technical : [],
+            soft: Array.isArray(parsed.skills?.soft) ? parsed.skills.soft : [],
+        },
+        projects: Array.isArray(parsed.projects) ? parsed.projects : [],
+        certifications: Array.isArray(parsed.certifications) ? parsed.certifications : [],
+        achievements: Array.isArray(parsed.achievements) ? parsed.achievements : [],
+    };
 }
 

@@ -13,11 +13,17 @@ This application uses Google's Gemini AI (free tier) to intelligently parse resu
 
 ### Option 1: Environment Variable (Recommended)
 
-Create a `.env` file in the root directory:
+1. Create a `.env` file in the root directory
+2. Add your Gemini API key:
 
 ```bash
-VITE_GEMINI_API_KEY=AIzaSyAq64nfJv9jpkCK9DDrTakb920KfMGvbkY
+VITE_GEMINI_API_KEY=your_api_key_here
 ```
+
+**⚠️ IMPORTANT:** 
+- Never commit your `.env` file to git
+- Never share your API key publicly
+- If your API key is leaked, get a new one immediately
 
 ### Option 2: Pass as Parameter
 

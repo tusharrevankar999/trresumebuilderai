@@ -7,9 +7,15 @@ import {
     generateCoverLetter,
     improveText,
     quantifyAchievement,
+    makeStronger,
+    shortenText,
+    humanizeText,
+    detectOverusedWords,
+    scanQuantifiedMetrics,
     type ResumeData,
     type JobDescription,
     type ATSScore,
+    type SummaryStyle,
 } from '~/lib/ai-features';
 
 interface AIFeaturesProps {
@@ -17,6 +23,7 @@ interface AIFeaturesProps {
     onSummaryUpdate: (summary: string) => void;
     onBulletsUpdate: (expIndex: number, bullets: string[]) => void;
     onDescriptionUpdate: (expIndex: number, descIndex: number, text: string) => void;
+    onSkillsUpdate?: (skills: { technical: string[]; soft: string[] }) => void;
 }
 
 export default function AIFeatures({
@@ -24,17 +31,21 @@ export default function AIFeatures({
     onSummaryUpdate,
     onBulletsUpdate,
     onDescriptionUpdate,
+    onSkillsUpdate,
 }: AIFeaturesProps) {
     const [isGenerating, setIsGenerating] = useState<string | null>(null);
     const [atsScore, setAtsScore] = useState<ATSScore | null>(null);
     const [jdMatch, setJdMatch] = useState<{ score: number; missing: string[] } | null>(null);
     const [jobDescription, setJobDescription] = useState('');
     const [coverLetter, setCoverLetter] = useState('');
+    const [summaryStyle, setSummaryStyle] = useState<SummaryStyle>('classic');
+    const [overusedWords, setOverusedWords] = useState<Array<{ word: string; count: number; suggestions: string[] }>>([]);
+    const [metricsScan, setMetricsScan] = useState<{ hasMetrics: boolean; metricCount: number; bulletsWithoutMetrics: number; suggestions: string[] } | null>(null);
 
-    const handleGenerateSummary = async () => {
+    const handleGenerateSummary = async (style: SummaryStyle = summaryStyle) => {
         setIsGenerating('summary');
         try {
-            const summary = await generateSummary(resumeData);
+            const summary = await generateSummary(resumeData, style);
             if (summary) {
                 onSummaryUpdate(summary);
             }
@@ -82,6 +93,40 @@ export default function AIFeatures({
             description: jobDescription,
         });
         setJdMatch({ score: match.score, missing: match.missing });
+        
+        // Also scan for overused words and metrics
+        const resumeText = [
+            resumeData.summary,
+            resumeData.experience.map(e => e.description.join(' ')).join(' '),
+        ].join(' ');
+        const overused = detectOverusedWords(resumeText);
+        setOverusedWords(overused);
+        
+        const metrics = scanQuantifiedMetrics(resumeData.experience);
+        setMetricsScan(metrics);
+    };
+    
+    const handleAddMissingSkill = (skill: string) => {
+        if (onSkillsUpdate) {
+            const currentSkills = resumeData.skills;
+            // Determine if it's technical or soft skill (simple heuristic)
+            const technicalKeywords = ['javascript', 'python', 'react', 'node', 'aws', 'docker', 'sql', 'api', 'git', 'linux', 'typescript', 'java', 'c++', 'mongodb', 'postgresql', 'kubernetes', 'html', 'css'];
+            const isTechnical = technicalKeywords.some(kw => skill.toLowerCase().includes(kw));
+            
+            if (isTechnical) {
+                const updated = {
+                    ...currentSkills,
+                    technical: [...currentSkills.technical.filter(s => s.trim()), skill].filter(s => s.trim()),
+                };
+                onSkillsUpdate(updated);
+            } else {
+                const updated = {
+                    ...currentSkills,
+                    soft: [...currentSkills.soft.filter(s => s.trim()), skill].filter(s => s.trim()),
+                };
+                onSkillsUpdate(updated);
+            }
+        }
     };
 
     const handleGenerateCoverLetter = async () => {
@@ -197,22 +242,64 @@ export default function AIFeatures({
                     </button>
                 </div>
                 {jdMatch && (
-                    <div className="mt-4 p-3 bg-green-50 rounded-lg">
-                        <div className="text-2xl font-bold text-green-600 mb-2">
-                            {jdMatch.score}% Match
+                    <div className="mt-4 space-y-4">
+                        <div className="p-3 bg-green-50 rounded-lg">
+                            <div className="text-2xl font-bold text-green-600 mb-2">
+                                {jdMatch.score}% Match
+                            </div>
+                            {jdMatch.missing.length > 0 && (
+                                <div className="mt-2">
+                                    <p className="text-sm font-semibold text-gray-700 mb-2">Missing Skills/Keywords:</p>
+                                    <div className="flex flex-wrap gap-2">
+                                        {jdMatch.missing.slice(0, 15).map((keyword, i) => (
+                                            <button
+                                                key={i}
+                                                onClick={() => handleAddMissingSkill(keyword)}
+                                                className="px-3 py-1.5 bg-red-100 text-red-700 rounded text-xs font-medium hover:bg-red-200 border border-red-300 flex items-center gap-1"
+                                                title="Click to add to skills"
+                                            >
+                                                {keyword}
+                                                <span className="text-red-600">+</span>
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
                         </div>
-                        {jdMatch.missing.length > 0 && (
-                            <div className="mt-2">
-                                <p className="text-sm font-semibold text-gray-700 mb-1">Missing Keywords:</p>
-                                <div className="flex flex-wrap gap-2">
-                                    {jdMatch.missing.slice(0, 10).map((keyword, i) => (
-                                        <span
-                                            key={i}
-                                            className="px-2 py-1 bg-red-100 text-red-700 rounded text-xs"
-                                        >
-                                            {keyword}
-                                        </span>
+                        
+                        {overusedWords.length > 0 && (
+                            <div className="p-3 bg-yellow-50 rounded-lg border border-yellow-200">
+                                <p className="text-sm font-semibold text-gray-700 mb-2">⚠️ Overused Words Detected:</p>
+                                <div className="space-y-2">
+                                    {overusedWords.map((item, i) => (
+                                        <div key={i} className="text-xs">
+                                            <span className="font-medium text-yellow-800">"{item.word}"</span>
+                                            <span className="text-gray-600"> used {item.count} times. Try: </span>
+                                            <span className="text-blue-600">{item.suggestions.slice(0, 2).join(', ')}</span>
+                                        </div>
                                     ))}
+                                </div>
+                            </div>
+                        )}
+                        
+                        {metricsScan && (
+                            <div className="p-3 bg-blue-50 rounded-lg border border-blue-200">
+                                <p className="text-sm font-semibold text-gray-700 mb-2">📊 Metrics Analysis:</p>
+                                <div className="text-xs text-gray-700 space-y-1">
+                                    <div>
+                                        <span className="font-medium">Bullets with metrics:</span> {metricsScan.metricCount}
+                                    </div>
+                                    <div>
+                                        <span className="font-medium">Bullets without metrics:</span> {metricsScan.bulletsWithoutMetrics}
+                                    </div>
+                                    {metricsScan.bulletsWithoutMetrics > 0 && (
+                                        <div className="mt-2">
+                                            <p className="font-medium text-blue-700 mb-1">Suggestions:</p>
+                                            {metricsScan.suggestions.slice(0, 3).map((s, i) => (
+                                                <div key={i} className="text-blue-600">• {s}</div>
+                                            ))}
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         )}
@@ -238,14 +325,58 @@ export default function AIFeatures({
             {/* AI Action Buttons */}
             <div className="bg-white rounded-lg p-4 border border-gray-200">
                 <h3 className="font-semibold text-gray-900 mb-3">AI Writing Assistant</h3>
-                <div className="space-y-2">
-                    <button
-                        onClick={handleGenerateSummary}
-                        disabled={isGenerating === 'summary'}
-                        className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
-                    >
-                        {isGenerating === 'summary' ? 'Generating Summary...' : '✨ Generate Professional Summary'}
-                    </button>
+                <div className="space-y-3">
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Summary Style:</label>
+                        <div className="flex gap-2 mb-3">
+                            <button
+                                onClick={() => {
+                                    setSummaryStyle('classic');
+                                    handleGenerateSummary('classic');
+                                }}
+                                className={`px-3 py-1.5 rounded text-xs font-medium ${
+                                    summaryStyle === 'classic'
+                                        ? 'bg-blue-600 text-white'
+                                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                }`}
+                            >
+                                Classic
+                            </button>
+                            <button
+                                onClick={() => {
+                                    setSummaryStyle('bold');
+                                    handleGenerateSummary('bold');
+                                }}
+                                className={`px-3 py-1.5 rounded text-xs font-medium ${
+                                    summaryStyle === 'bold'
+                                        ? 'bg-blue-600 text-white'
+                                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                }`}
+                            >
+                                Bold
+                            </button>
+                            <button
+                                onClick={() => {
+                                    setSummaryStyle('storytelling');
+                                    handleGenerateSummary('storytelling');
+                                }}
+                                className={`px-3 py-1.5 rounded text-xs font-medium ${
+                                    summaryStyle === 'storytelling'
+                                        ? 'bg-blue-600 text-white'
+                                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                }`}
+                            >
+                                Storytelling
+                            </button>
+                        </div>
+                        <button
+                            onClick={() => handleGenerateSummary()}
+                            disabled={isGenerating === 'summary'}
+                            className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+                        >
+                            {isGenerating === 'summary' ? 'Generating Summary...' : '✨ Generate Professional Summary'}
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -254,54 +385,92 @@ export default function AIFeatures({
 
 export function AIBulletButtons({
     expIndex,
-    description,
+    descIndex,
+    text,
     onUpdate,
     isGenerating,
 }: {
     expIndex: number;
-    description: string[];
-    onUpdate: (bullets: string[]) => void;
+    descIndex: number;
+    text: string;
+    onUpdate: (text: string) => void;
     isGenerating: boolean;
 }) {
-    const handleGenerate = async () => {
-        // This will be handled by parent component
-    };
+    const [isProcessing, setIsProcessing] = useState(false);
 
-    const handleImprove = async (index: number) => {
-        if (!description[index]) return;
-        const improved = await improveText(description[index]);
-        if (improved) {
-            const newDesc = [...description];
-            newDesc[index] = improved;
-            onUpdate(newDesc);
-        }
-    };
-
-    const handleQuantify = async (index: number) => {
-        if (!description[index]) return;
-        const quantified = await quantifyAchievement(description[index]);
-        if (quantified) {
-            const newDesc = [...description];
-            newDesc[index] = quantified;
-            onUpdate(newDesc);
+    const handleAction = async (action: 'improve' | 'quantify' | 'stronger' | 'shorten' | 'humanize') => {
+        if (!text || isProcessing) return;
+        setIsProcessing(true);
+        try {
+            let result = text;
+            switch (action) {
+                case 'improve':
+                    result = await improveText(text);
+                    break;
+                case 'quantify':
+                    result = await quantifyAchievement(text);
+                    break;
+                case 'stronger':
+                    result = await makeStronger(text);
+                    break;
+                case 'shorten':
+                    result = await shortenText(text);
+                    break;
+                case 'humanize':
+                    result = await humanizeText(text);
+                    break;
+            }
+            if (result && result !== text) {
+                onUpdate(result);
+            }
+        } catch (error) {
+            console.error(`Error in ${action}:`, error);
+        } finally {
+            setIsProcessing(false);
         }
     };
 
     return (
-        <div className="flex gap-2 mt-2">
+        <div className="flex flex-wrap gap-1.5 mt-2">
             <button
-                onClick={() => handleImprove(0)}
-                className="px-3 py-1 bg-gray-100 text-gray-700 rounded text-xs hover:bg-gray-200"
+                onClick={() => handleAction('stronger')}
+                disabled={isProcessing}
+                className="px-2.5 py-1 bg-blue-50 text-blue-700 rounded text-xs font-medium hover:bg-blue-100 disabled:opacity-50 border border-blue-200"
+                title="Make stronger with power words"
+            >
+                💪 Stronger
+            </button>
+            <button
+                onClick={() => handleAction('quantify')}
+                disabled={isProcessing}
+                className="px-2.5 py-1 bg-green-50 text-green-700 rounded text-xs font-medium hover:bg-green-100 disabled:opacity-50 border border-green-200"
+                title="Add metrics"
+            >
+                📊 Add Metrics
+            </button>
+            <button
+                onClick={() => handleAction('shorten')}
+                disabled={isProcessing}
+                className="px-2.5 py-1 bg-purple-50 text-purple-700 rounded text-xs font-medium hover:bg-purple-100 disabled:opacity-50 border border-purple-200"
+                title="Shorten text"
+            >
+                ✂️ Shorten
+            </button>
+            <button
+                onClick={() => handleAction('humanize')}
+                disabled={isProcessing}
+                className="px-2.5 py-1 bg-orange-50 text-orange-700 rounded text-xs font-medium hover:bg-orange-100 disabled:opacity-50 border border-orange-200"
+                title="Make more human and natural"
+            >
+                🤝 Humanize
+            </button>
+            <button
+                onClick={() => handleAction('improve')}
+                disabled={isProcessing}
+                className="px-2.5 py-1 bg-gray-50 text-gray-700 rounded text-xs font-medium hover:bg-gray-100 disabled:opacity-50 border border-gray-200"
                 title="Improve grammar and tone"
             >
                 ✏️ Improve
-            </button>
-            <button
-                onClick={() => handleQuantify(0)}
-                className="px-3 py-1 bg-gray-100 text-gray-700 rounded text-xs hover:bg-gray-200"
-                title="Add quantifiable metrics"
-            >
-                📊 Quantify
             </button>
         </div>
     );
