@@ -1,60 +1,59 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
-import { usePuterStore } from "~/lib/puter";
+import { storage, fileStorage, auth } from "~/lib/storage";
 
 const WipeApp = () => {
-    const { auth, isLoading, error, clearError, fs, kv } = usePuterStore();
     const navigate = useNavigate();
-    const [files, setFiles] = useState<FSItem[]>([]);
+    const [keys, setKeys] = useState<string[]>([]);
 
-    const loadFiles = async () => {
-        const files = (await fs.readDir("./")) as FSItem[];
-        setFiles(files);
+    const loadKeys = async () => {
+        const allKeys = await storage.list();
+        setKeys(allKeys);
     };
 
     useEffect(() => {
-        loadFiles();
+        loadKeys();
     }, []);
 
-    useEffect(() => {
-        if (!isLoading && !auth.isAuthenticated) {
-            navigate("/auth?next=/wipe");
-        }
-    }, [isLoading]);
-
     const handleDelete = async () => {
-        files.forEach(async (file) => {
-            await fs.delete(file.path);
-        });
-        await kv.flush();
-        loadFiles();
+        // Clear all localStorage keys
+        for (const key of keys) {
+            await storage.delete(key);
+        }
+        // Clear IndexedDB
+        try {
+            const db = await new Promise<IDBDatabase>((resolve, reject) => {
+                const request = indexedDB.open('resume-analyzer-files', 1);
+                request.onerror = () => reject(request.error);
+                request.onsuccess = () => resolve(request.result);
+            });
+            const transaction = db.transaction(['files'], 'readwrite');
+            const store = transaction.objectStore('files');
+            await new Promise<void>((resolve, reject) => {
+                const request = store.clear();
+                request.onsuccess = () => resolve();
+                request.onerror = () => reject(request.error);
+            });
+        } catch (error) {
+            console.error('Error clearing IndexedDB:', error);
+        }
+        loadKeys();
+        alert('All app data cleared!');
     };
 
-    if (isLoading) {
-        return <div>Loading...</div>;
-    }
-
-    if (error) {
-        return <div>Error {error}</div>;
-    }
-
     return (
-        <div>
-            Authenticated as: {auth.user?.username}
-            <div>Existing files:</div>
-            <div className="flex flex-col gap-4">
-                {files.map((file) => (
-                    <div key={file.id} className="flex flex-row gap-4">
-                        <p>{file.name}</p>
-                    </div>
-                ))}
+        <div className="p-8">
+            <h1 className="text-2xl font-bold mb-4">Wipe App Data</h1>
+            <p className="mb-4">This will delete all stored resumes and files.</p>
+            <div className="mb-4">
+                <p>Found {keys.length} stored items</p>
             </div>
             <div>
                 <button
-                    className="bg-blue-500 text-white px-4 py-2 rounded-md cursor-pointer"
+                    className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-md cursor-pointer"
                     onClick={() => handleDelete()}
                 >
-                    Wipe App Data
+                    Wipe All App Data
                 </button>
             </div>
         </div>

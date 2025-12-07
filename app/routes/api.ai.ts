@@ -20,7 +20,8 @@ export async function action({ request }: ActionFunctionArgs) {
             );
         }
 
-        // Use Hugging Face exclusively
+        // Use Hugging Face exclusively - NO PUTER API CALLS
+        console.log('🚀 Server: Calling Hugging Face API (NOT puter.com)');
         return await callHuggingFace(prompt, model);
 
     } catch (error: any) {

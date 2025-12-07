@@ -1,4 +1,4 @@
-import {usePuterStore} from "~/lib/puter";
+import {auth} from "~/lib/storage";
 import {useEffect} from "react";
 import {useLocation, useNavigate} from "react-router";
 
@@ -8,7 +8,6 @@ export const meta = () => ([
 ])
 
 const Auth = () => {
-    const { isLoading, auth } = usePuterStore();
     const location = useLocation();
     const next = location.search.split('next=')[1];
     const navigate = useNavigate();
@@ -26,22 +25,14 @@ const Auth = () => {
                         <h2>Log In to Continue Your Job Journey</h2>
                     </div>
                     <div>
-                        {isLoading ? (
-                            <button className="auth-button animate-pulse">
-                                <p>Signing you in...</p>
-                            </button>
+                        {auth.isAuthenticated ? (
+                            <div className="auth-button">
+                                <p>You are logged in</p>
+                            </div>
                         ) : (
-                            <>
-                                {auth.isAuthenticated ? (
-                                    <button className="auth-button" onClick={auth.signOut}>
-                                        <p>Log Out</p>
-                                    </button>
-                                ) : (
-                                    <button className="auth-button" onClick={auth.signIn}>
-                                        <p>Log In</p>
-                                    </button>
-                                )}
-                            </>
+                            <div className="auth-button">
+                                <p>No login required</p>
+                            </div>
                         )}
                     </div>
                 </section>

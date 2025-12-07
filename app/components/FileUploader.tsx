@@ -5,9 +5,10 @@ import { formatSize } from '../lib/utils'
 interface FileUploaderProps {
     onFileSelect?: (file: File | null) => void;
     accept?: string; // e.g., ".pdf,.docx,.doc,.txt"
+    hasError?: boolean;
 }
 
-const FileUploader = ({ onFileSelect, accept = ".pdf" }: FileUploaderProps) => {
+const FileUploader = ({ onFileSelect, accept = ".pdf", hasError = false }: FileUploaderProps) => {
     const onDrop = useCallback((acceptedFiles: File[]) => {
         const file = acceptedFiles[0] || null;
 
@@ -47,7 +48,7 @@ const FileUploader = ({ onFileSelect, accept = ".pdf" }: FileUploaderProps) => {
 
 
     return (
-        <div className="w-full gradient-border">
+        <div className={`w-full gradient-border ${hasError ? 'border-2 border-red-300 bg-red-50' : ''}`}>
             <div {...getRootProps()}>
                 <input {...getInputProps()} />
 

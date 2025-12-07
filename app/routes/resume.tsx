@@ -1,6 +1,6 @@
 import {Link, useNavigate, useParams} from "react-router";
 import {useEffect, useState, type FormEvent} from "react";
-import {usePuterStore} from "~/lib/puter";
+import {fileStorage, storage, auth} from "~/lib/storage";
 import Summary from "~/components/Summary";
 import ATS from "~/components/ATS";
 import Details from "~/components/Details";
@@ -17,14 +17,12 @@ export const meta = () => ([
 ])
 
 const Resume = () => {
-    const { auth, isLoading, fs, kv } = usePuterStore();
     const { id } = useParams();
     const [imageUrl, setImageUrl] = useState('');
     const [resumeUrl, setResumeUrl] = useState('');
     const [feedback, setFeedback] = useState<Feedback | null>(null);
     const [parsedResumeData, setParsedResumeData] = useState<ParsedResumeData | null>(null);
     const [jobDescription, setJobDescription] = useState<JobDescription | null>(null);
-    const [showATSReview, setShowATSReview] = useState(false);
     const [showJDForm, setShowJDForm] = useState(false);
     const [isLoadingResume, setIsLoadingResume] = useState(true);
     const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -32,20 +30,12 @@ const Resume = () => {
     const [resumeText, setResumeText] = useState<string>('');
     const navigate = useNavigate();
 
-    // Hardcode authentication on initial load to prevent login page
-    useEffect(() => {
-        if(!auth.isAuthenticated) {
-            auth.setHardcodedAuth({
-                uuid: 'hardcoded-user-uuid-12345',
-                username: 'demo-user'
-            });
-        }
-    }, [])
+    // Auth is already set in storage.ts
 
     useEffect(() => {
         const loadResume = async () => {
             setIsLoadingResume(true);
-            const resume = await kv.get(`resume:${id}`);
+            const resume = await storage.get(`resume:${id}`);
 
             if(!resume) {
                 setIsLoadingResume(false);
@@ -54,7 +44,7 @@ const Resume = () => {
 
             const data = JSON.parse(resume);
 
-            const resumeBlob = await fs.read(data.resumePath);
+            const resumeBlob = await fileStorage.read(data.resumePath);
             if(!resumeBlob) {
                 setIsLoadingResume(false);
                 return;
@@ -64,7 +54,7 @@ const Resume = () => {
             const resumeUrl = URL.createObjectURL(pdfBlob);
             setResumeUrl(resumeUrl);
 
-            const imageBlob = await fs.read(data.imagePath);
+            const imageBlob = await fileStorage.read(data.imagePath);
             if(!imageBlob) {
                 setIsLoadingResume(false);
                 return;
@@ -74,20 +64,37 @@ const Resume = () => {
 
             setFeedback(data.feedback);
             setParsedResumeData(data.parsedResumeData || null);
-            setJobDescription(data.jobDescription || {
+            const jobDesc = data.jobDescription || {
                 title: data.jobTitle || '',
                 description: data.jobDescriptionText || data.jobDescription || '',
                 company: data.companyName || '',
-            });
+            };
+            setJobDescription(jobDesc);
             
             // Extract resume text for re-analysis if needed
             if (data.resumePath) {
                 try {
-                    const resumeBlob = await fs.read(data.resumePath);
+                    const resumeBlob = await fileStorage.read(data.resumePath);
                     if (resumeBlob) {
                         const pdfFile = new File([resumeBlob], 'resume.pdf', { type: 'application/pdf' });
                         const text = await extractTextFromPdf(pdfFile);
                         setResumeText(text);
+                        
+                        // If we have resume text, parsed data, and job description but no feedback, run analysis
+                        if (text && data.parsedResumeData && jobDesc.description && jobDesc.description.trim() !== '' && !data.feedback) {
+                            console.log('🔄 Running analysis automatically...');
+                            try {
+                                const newFeedback = await analyzeResumeWithGemini(text, jobDesc);
+                                if (newFeedback) {
+                                    setFeedback(newFeedback);
+                                    // Save updated feedback
+                                    const updatedData = { ...data, feedback: newFeedback };
+                                    await storage.set(`resume:${id}`, JSON.stringify(updatedData));
+                                }
+                            } catch (err) {
+                                console.error('Error running automatic analysis:', err);
+                            }
+                        }
                     }
                 } catch (err) {
                     console.error('Error extracting resume text:', err);
@@ -142,6 +149,7 @@ const Resume = () => {
 
             // Re-analyze with new job description if we have resume text
             if (resumeText && parsedResumeData) {
+                console.log('🔍 Re-analyzing resume - Using Hugging Face API (NOT puter.com)');
                 const newFeedback = await analyzeResumeWithGemini(resumeText, jobDesc);
                 if (newFeedback) {
                     setFeedback(newFeedback);
@@ -172,7 +180,7 @@ const Resume = () => {
                     });
                     
                     // Save updated data
-                    const resume = await kv.get(`resume:${id}`);
+                    const resume = await storage.get(`resume:${id}`);
                     if (resume) {
                         const data = JSON.parse(resume);
                         data.feedback = newFeedback;
@@ -180,7 +188,7 @@ const Resume = () => {
                         data.companyName = companyName;
                         data.jobTitle = jobTitle;
                         data.jobDescriptionText = jdText;
-                        await kv.set(`resume:${id}`, JSON.stringify(data));
+                        await storage.set(`resume:${id}`, JSON.stringify(data));
                     }
                 }
             }
@@ -202,48 +210,9 @@ const Resume = () => {
                     <span className="text-gray-800 text-sm font-semibold">Back to Homepage</span>
                 </Link>
             </nav>
-            <div className="flex flex-row w-full max-lg:flex-col-reverse">
-                <section className="feedback-section bg-[url('/images/bg-small.svg') bg-cover h-[100vh] sticky top-0 items-center justify-center">
-                    {imageUrl && resumeUrl && (
-                        <div className="animate-in fade-in duration-1000 gradient-border max-sm:m-0 h-[90%] max-wxl:h-fit w-fit">
-                            <a href={resumeUrl} target="_blank" rel="noopener noreferrer">
-                                <img
-                                    src={imageUrl}
-                                    className="w-full h-full object-contain rounded-2xl"
-                                    title="resume"
-                                />
-                            </a>
-                        </div>
-                    )}
-                </section>
-                <section className="feedback-section">
-                    <h2 className="text-4xl !text-black font-bold mb-8">Resume Review</h2>
-                    {!showATSReview ? (
-                        <div className="flex flex-col gap-6 items-center justify-center py-12 min-h-[400px] w-full">
-                            <div className="flex flex-col gap-4 w-full max-w-md">
-                                <button
-                                    onClick={() => navigate('/upload')}
-                                    className="primary-button text-xl font-semibold py-4 px-8 text-center flex items-center justify-center"
-                                    type="button"
-                                >
-                                    Create Resume
-                                </button>
-                                <button
-                                    onClick={() => {
-                                        setShowATSReview(true);
-                                        // Show JD form if no job description exists
-                                        if (!jobDescription || !jobDescription.description || jobDescription.description.trim() === '') {
-                                            setShowJDForm(true);
-                                        }
-                                    }}
-                                    className="primary-button text-xl font-semibold py-4 px-8 text-center flex items-center justify-center"
-                                    type="button"
-                                >
-                                    Review ATS
-                                </button>
-                            </div>
-                        </div>
-                    ) : showJDForm ? (
+            <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+                <h2 className="text-4xl !text-black font-bold mb-8">Resume Review</h2>
+                {showJDForm ? (
                         <div className="flex flex-col gap-6 w-full max-w-2xl">
                             <div className="bg-white rounded-2xl shadow-md p-6">
                                 <h3 className="text-2xl font-bold mb-4">Add Job Description for ATS Match</h3>
@@ -309,9 +278,6 @@ const Resume = () => {
                                                 type="button" 
                                                 onClick={() => {
                                                     setShowJDForm(false);
-                                                    if (!jobDescription || !jobDescription.description || jobDescription.description.trim() === '') {
-                                                        setShowATSReview(false);
-                                                    }
                                                 }}
                                                 className="bg-gray-200 hover:bg-gray-300 text-gray-800 rounded-lg px-6 py-3 font-semibold"
                                             >
@@ -322,59 +288,76 @@ const Resume = () => {
                                 )}
                             </div>
                         </div>
-                    ) : isLoadingResume || !feedback ? (
-                        <div className="flex flex-col items-center justify-center py-12">
-                            <img src="/images/resume-scan-2.gif" className="w-full max-w-md" />
-                        </div>
-                    ) : (
-                        <div className="flex flex-col gap-8 animate-in fade-in duration-1000">
-                            <div className="flex items-center justify-between">
-                                <h3 className="text-2xl font-bold">ATS Analysis</h3>
-                                {(!jobDescription || !jobDescription.description || jobDescription.description.trim() === '') && (
-                                    <button
-                                        onClick={() => setShowJDForm(true)}
-                                        className="bg-blue-600 hover:bg-blue-700 text-white rounded-lg px-4 py-2 text-sm font-semibold"
-                                    >
-                                        + Add Job Description
-                                    </button>
-                                )}
-                                {jobDescription && jobDescription.description && jobDescription.description.trim() !== '' && (
-                                    <button
-                                        onClick={() => setShowJDForm(true)}
-                                        className="bg-gray-200 hover:bg-gray-300 text-gray-800 rounded-lg px-4 py-2 text-sm font-semibold"
-                                    >
-                                        Update Job Description
-                                    </button>
-                                )}
-                            </div>
-                            <Summary feedback={feedback} />
-                            {parsedResumeData && jobDescription && jobDescription.description && jobDescription.description.trim() !== '' ? (
-                                <EnhancedATS 
-                                    resumeData={parsedResumeData} 
-                                    jobDescription={jobDescription}
-                                    onResumeUpdate={(updated) => {
-                                        setParsedResumeData(updated);
-                                        // Optionally save updated resume data
-                                    }}
-                                />
-                            ) : (
-                                <div className="bg-yellow-50 border border-yellow-200 rounded-2xl p-6">
-                                    <h3 className="text-xl font-bold mb-2 text-yellow-800">⚠️ Job Description Required</h3>
-                                    <p className="text-gray-700 mb-4">
-                                        Add a job description to get detailed ATS match analysis, keyword recommendations, and missing skills alerts.
-                                    </p>
-                                    <button
-                                        onClick={() => setShowJDForm(true)}
-                                        className="primary-button"
-                                    >
-                                        Add Job Description
-                                    </button>
-                                </div>
+                ) : isLoadingResume ? (
+                    <div className="flex flex-col items-center justify-center py-12">
+                        <img src="/images/resume-scan-2.gif" className="w-full max-w-md" />
+                        <p className="text-gray-600 mt-4">Loading resume analysis...</p>
+                    </div>
+                ) : (
+                    <div className="flex flex-col gap-8 animate-in fade-in duration-1000">
+                        <div className="flex items-center justify-between">
+                            <h3 className="text-2xl font-bold">ATS Analysis</h3>
+                            {(!jobDescription || !jobDescription.description || jobDescription.description.trim() === '') && (
+                                <button
+                                    onClick={() => setShowJDForm(true)}
+                                    className="bg-blue-600 hover:bg-blue-700 text-white rounded-lg px-4 py-2 text-sm font-semibold"
+                                >
+                                    + Add Job Description
+                                </button>
                             )}
-                            <Details feedback={feedback} />
+                            {jobDescription && jobDescription.description && jobDescription.description.trim() !== '' && (
+                                <button
+                                    onClick={() => setShowJDForm(true)}
+                                    className="bg-gray-200 hover:bg-gray-300 text-gray-800 rounded-lg px-4 py-2 text-sm font-semibold"
+                                >
+                                    Update Job Description
+                                </button>
+                            )}
                         </div>
-                    )}
-                </section>
+                        {feedback && <Summary feedback={feedback} />}
+                        {parsedResumeData ? (
+                            <>
+                                {jobDescription && jobDescription.description && jobDescription.description.trim() !== '' ? (
+                                    <EnhancedATS 
+                                        resumeData={parsedResumeData} 
+                                        jobDescription={jobDescription}
+                                        onResumeUpdate={(updated) => {
+                                            setParsedResumeData(updated);
+                                            // Optionally save updated resume data
+                                        }}
+                                    />
+                                ) : (
+                                    <div className="bg-yellow-50 border border-yellow-200 rounded-2xl p-6">
+                                        <h3 className="text-xl font-bold mb-2 text-yellow-800">⚠️ Job Description Required</h3>
+                                        <p className="text-gray-700 mb-4">
+                                            Add a job description to get detailed ATS match analysis, keyword recommendations, and missing skills alerts.
+                                        </p>
+                                        <button
+                                            onClick={() => setShowJDForm(true)}
+                                            className="primary-button"
+                                        >
+                                            Add Job Description
+                                        </button>
+                                    </div>
+                                )}
+                            </>
+                        ) : (
+                            <div className="bg-red-50 border border-red-200 rounded-2xl p-6">
+                                <h3 className="text-xl font-bold mb-2 text-red-800">⚠️ Resume Data Not Available</h3>
+                                <p className="text-gray-700 mb-4">
+                                    Unable to load resume data. Please try uploading the resume again.
+                                </p>
+                                <button
+                                    onClick={() => navigate('/upload')}
+                                    className="primary-button"
+                                >
+                                    Upload Resume
+                                </button>
+                            </div>
+                        )}
+                        {feedback && <Details feedback={feedback} />}
+                    </div>
+                )}
             </div>
         </main>
     )

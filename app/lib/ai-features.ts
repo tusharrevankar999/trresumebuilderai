@@ -17,6 +17,8 @@ export { parseResumeWithGemini } from './gemini';
  */
 async function callGeminiAPI(prompt: string, model: string = 'meta-llama/Meta-Llama-3-8B-Instruct'): Promise<any> {
     // Call our server-side proxy to avoid CORS issues
+    // This uses Hugging Face API exclusively - NO PUTER API CALLS
+    console.log('🤖 Calling Hugging Face AI via /api/ai (NOT puter.com)');
     const response = await fetch('/api/ai', {
         method: 'POST',
         headers: {
@@ -451,19 +453,22 @@ Provide feedback in this EXACT JSON format:
 Return ONLY valid JSON, no markdown, no code blocks, no explanations.`;
 
     try {
+        console.log('📊 Starting ATS analysis with Hugging Face (NOT puter.com)...');
         const data = await callGeminiAPI(prompt);
         
         if (!data.candidates || !data.candidates[0] || !data.candidates[0].content) {
-            console.error('Invalid response from Gemini API');
+            console.error('Invalid response from Hugging Face API');
             return null;
         }
         
         const content = data.candidates[0].content.parts[0].text.trim() || '';
         
         if (!content) {
-            console.error('No content from Gemini API');
+            console.error('No content from Hugging Face API');
             return null;
         }
+        
+        console.log('✅ ATS analysis completed using Hugging Face');
 
         // Extract JSON from response
         let jsonText = content.trim();

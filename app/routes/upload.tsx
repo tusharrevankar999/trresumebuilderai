@@ -1,28 +1,39 @@
 import {type FormEvent, useState} from 'react'
 import Navbar from "~/components/Navbar";
 import FileUploader from "~/components/FileUploader";
-import {usePuterStore} from "~/lib/puter";
+import {fileStorage, storage} from "~/lib/storage";
 import {useNavigate} from "react-router";
 import {convertPdfToImage, extractTextFromPdf} from "~/lib/pdf2img";
 import {generateUUID} from "~/lib/utils";
-import {analyzeResumeWithGemini, parseResumeWithGemini, type JobDescription} from "~/lib/ai-features";
+import {analyzeResumeWithGemini, parseResumeWithGemini, calculateATSScore, calculateJDMatch, calculateContentStrength, calculateOverallResumeScore, detectOverusedWords, type JobDescription} from "~/lib/ai-features";
+import {saveATSAnalysisRecord} from "~/lib/firebase";
+import {Timestamp} from "firebase/firestore";
 
 const Upload = () => {
-    const { auth, isLoading, fs, kv } = usePuterStore();
     const navigate = useNavigate();
     const [isProcessing, setIsProcessing] = useState(false);
     const [statusText, setStatusText] = useState('');
     const [file, setFile] = useState<File | null>(null);
+    const [errors, setErrors] = useState<{
+        companyName?: string;
+        jobTitle?: string;
+        jobDescription?: string;
+        file?: string;
+    }>({});
 
     const handleFileSelect = (file: File | null) => {
-        setFile(file)
+        setFile(file);
+        // Clear file error when file is selected
+        if (file && errors.file) {
+            setErrors(prev => ({ ...prev, file: undefined }));
+        }
     }
 
     const handleAnalyze = async ({ companyName, jobTitle, jobDescription, file }: { companyName: string, jobTitle: string, jobDescription: string, file: File }) => {
         setIsProcessing(true);
 
         setStatusText('Uploading the file...');
-        const uploadedFile = await fs.upload([file]);
+        const uploadedFile = await fileStorage.upload([file]);
         if(!uploadedFile) {
             setIsProcessing(false);
             return setStatusText('Error: Failed to upload file');
@@ -36,7 +47,7 @@ const Upload = () => {
         }
 
         setStatusText('Uploading the image...');
-        const uploadedImage = await fs.upload([imageFile.file]);
+        const uploadedImage = await fileStorage.upload([imageFile.file]);
         if(!uploadedImage) {
             setIsProcessing(false);
             return setStatusText('Error: Failed to upload image');
@@ -78,9 +89,10 @@ const Upload = () => {
             parsedResumeData: parsedResumeData,
             jobDescription: jobDesc,
         }
-        await kv.set(`resume:${uuid}`, JSON.stringify(data));
+        await storage.set(`resume:${uuid}`, JSON.stringify(data));
 
         setStatusText('Analyzing with AI...');
+        console.log('🔍 Starting ATS analysis - Using Hugging Face API (NOT puter.com)');
 
         const feedback = await analyzeResumeWithGemini(resumeText, jobDesc);
         if (!feedback) {
@@ -89,7 +101,7 @@ const Upload = () => {
         }
 
         data.feedback = feedback;
-        await kv.set(`resume:${uuid}`, JSON.stringify(data));
+        await storage.set(`resume:${uuid}`, JSON.stringify(data));
 
         // Calculate ATS scores and save to Firebase
         if (parsedResumeData) {
@@ -129,12 +141,41 @@ const Upload = () => {
         if(!form) return;
         const formData = new FormData(form);
 
-        const companyName = formData.get('company-name') as string;
-        const jobTitle = formData.get('job-title') as string;
-        const jobDescription = formData.get('job-description') as string;
+        const companyName = (formData.get('company-name') as string)?.trim() || '';
+        const jobTitle = (formData.get('job-title') as string)?.trim() || '';
+        const jobDescription = (formData.get('job-description') as string)?.trim() || '';
 
-        if(!file) return;
+        // Validate form fields
+        const newErrors: typeof errors = {};
+        
+        if (!companyName) {
+            newErrors.companyName = 'Company name is required';
+        }
+        
+        if (!jobTitle) {
+            newErrors.jobTitle = 'Job title is required';
+        }
+        
+        if (!jobDescription) {
+            newErrors.jobDescription = 'Job description is required';
+        }
+        
+        if (!file) {
+            newErrors.file = 'Please upload a resume file';
+        }
 
+        // If there are errors, set them and return
+        if (Object.keys(newErrors).length > 0) {
+            setErrors(newErrors);
+            return;
+        }
+
+        // Clear errors if validation passes
+        setErrors({});
+
+        // TypeScript: file is guaranteed to be non-null here due to validation above
+        if (!file) return;
+        
         handleAnalyze({ companyName, jobTitle, jobDescription, file });
     }
 
@@ -160,24 +201,81 @@ const Upload = () => {
                     {!isProcessing && (
                         <form id="upload-form" onSubmit={handleSubmit} className="flex flex-col gap-4 mt-8">
                             <div className="form-div">
-                                <label htmlFor="company-name">Company Name</label>
-                                <input type="text" name="company-name" placeholder="Company Name" id="company-name" />
+                                <label htmlFor="company-name" className={errors.companyName ? 'text-red-500' : ''}>
+                                    Company Name {errors.companyName && <span className="text-red-400 text-sm">*</span>}
+                                </label>
+                                <input 
+                                    type="text" 
+                                    name="company-name" 
+                                    placeholder="Company Name" 
+                                    id="company-name"
+                                    className={errors.companyName ? 'border-red-300 bg-red-50 focus:border-red-500 focus:ring-red-500' : ''}
+                                    onChange={(e) => {
+                                        if (e.target.value.trim() && errors.companyName) {
+                                            setErrors(prev => ({ ...prev, companyName: undefined }));
+                                        }
+                                    }}
+                                />
+                                {errors.companyName && (
+                                    <p className="text-red-400 text-sm mt-1">{errors.companyName}</p>
+                                )}
                             </div>
                             <div className="form-div">
-                                <label htmlFor="job-title">Job Title</label>
-                                <input type="text" name="job-title" placeholder="Job Title" id="job-title" />
+                                <label htmlFor="job-title" className={errors.jobTitle ? 'text-red-500' : ''}>
+                                    Job Title {errors.jobTitle && <span className="text-red-400 text-sm">*</span>}
+                                </label>
+                                <input 
+                                    type="text" 
+                                    name="job-title" 
+                                    placeholder="Job Title" 
+                                    id="job-title"
+                                    className={errors.jobTitle ? 'border-red-300 bg-red-50 focus:border-red-500 focus:ring-red-500' : ''}
+                                    onChange={(e) => {
+                                        if (e.target.value.trim() && errors.jobTitle) {
+                                            setErrors(prev => ({ ...prev, jobTitle: undefined }));
+                                        }
+                                    }}
+                                />
+                                {errors.jobTitle && (
+                                    <p className="text-red-400 text-sm mt-1">{errors.jobTitle}</p>
+                                )}
                             </div>
                             <div className="form-div">
-                                <label htmlFor="job-description">Job Description</label>
-                                <textarea rows={5} name="job-description" placeholder="Paste job description here" id="job-description" />
+                                <label htmlFor="job-description" className={errors.jobDescription ? 'text-red-500' : ''}>
+                                    Job Description {errors.jobDescription && <span className="text-red-400 text-sm">*</span>}
+                                </label>
+                                <textarea 
+                                    rows={5} 
+                                    name="job-description" 
+                                    placeholder="Paste job description here" 
+                                    id="job-description"
+                                    className={errors.jobDescription ? 'border-red-300 bg-red-50 focus:border-red-500 focus:ring-red-500' : ''}
+                                    onChange={(e) => {
+                                        if (e.target.value.trim() && errors.jobDescription) {
+                                            setErrors(prev => ({ ...prev, jobDescription: undefined }));
+                                        }
+                                    }}
+                                />
+                                {errors.jobDescription && (
+                                    <p className="text-red-400 text-sm mt-1">{errors.jobDescription}</p>
+                                )}
                             </div>
 
                             <div className="form-div">
-                                <label htmlFor="uploader">Upload Resume (PDF)</label>
-                                <FileUploader onFileSelect={handleFileSelect} accept=".pdf" />
+                                <label htmlFor="uploader" className={errors.file ? 'text-red-500' : ''}>
+                                    Upload Resume (PDF) {errors.file && <span className="text-red-400 text-sm">*</span>}
+                                </label>
+                                <FileUploader onFileSelect={handleFileSelect} accept=".pdf" hasError={!!errors.file} />
+                                {errors.file && (
+                                    <p className="text-red-400 text-sm mt-1">{errors.file}</p>
+                                )}
                             </div>
 
-                            <button className="primary-button" type="submit">
+                            <button 
+                                className={`primary-button ${!file ? 'opacity-50 cursor-not-allowed' : ''}`} 
+                                type="submit"
+                                disabled={!file}
+                            >
                                 Analyze Resume
                             </button>
                         </form>

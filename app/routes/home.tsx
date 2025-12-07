@@ -1,7 +1,7 @@
 import type { Route } from "./+types/home";
 import Navbar from "~/components/Navbar";
 import ResumeCard from "~/components/ResumeCard";
-import {usePuterStore} from "~/lib/puter";
+import {storage, auth} from "~/lib/storage";
 import {Link, useNavigate} from "react-router";
 import {useEffect, useState} from "react";
 
@@ -13,29 +13,20 @@ export function meta({}: Route.MetaArgs) {
 }
 
 export default function Home() {
-  const { auth, kv } = usePuterStore();
   const navigate = useNavigate();
   const [resumes, setResumes] = useState<Resume[]>([]);
   const [loadingResumes, setLoadingResumes] = useState(false);
   const [showATSReview, setShowATSReview] = useState(false);
 
-  // Hardcode authentication on initial load to prevent login page
-  useEffect(() => {
-    if(!auth.isAuthenticated) {
-      auth.setHardcodedAuth({
-        uuid: 'hardcoded-user-uuid-12345',
-        username: 'demo-user'
-      });
-    }
-  }, [])
-
   useEffect(() => {
     const loadResumes = async () => {
       setLoadingResumes(true);
-      const resumes = (await kv.list('resume:*', true)) as KVItem[];
-      const parsedResumes = resumes?.map((resume) => (
-          JSON.parse(resume.value) as Resume
-      ))
+      const keys = await storage.list('resume:');
+      const resumePromises = keys.map(key => storage.get(key));
+      const resumeValues = await Promise.all(resumePromises);
+      const parsedResumes = resumeValues
+        .filter(v => v !== null)
+        .map(v => JSON.parse(v!) as Resume);
       setResumes(parsedResumes || []);
       setLoadingResumes(false);
     }
