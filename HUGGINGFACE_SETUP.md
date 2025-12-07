@@ -21,7 +21,6 @@ Your application now uses **Hugging Face Inference API** exclusively as the AI p
 Your Hugging Face API key is already configured in your `.env` file:
 
 ```bash
-HUGGINGFACE_API_KEY=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
 ```
 
 **Benefits of using API key:**
