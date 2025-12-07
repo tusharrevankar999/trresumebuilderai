@@ -6,5 +6,8 @@ export default [
     route('/upload', 'routes/upload.tsx'),
     route('/builder', 'routes/builder.tsx'),
     route('/resume/:id', 'routes/resume.tsx'),
+    route('/cover-letter', 'routes/cover-letter.tsx'),
+    route('/tradmin', 'routes/tradmin.tsx'),
     route('/wipe', 'routes/wipe.tsx'),
+    route('/api/ai', 'routes/api.ai.ts'),
 ] satisfies RouteConfig;

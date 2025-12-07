@@ -86,25 +86,81 @@ export async function convertPdfToImage(
 
 export async function extractTextFromPdf(file: File): Promise<string> {
     try {
+        console.log('📖 Loading PDF.js library...');
         const lib = await loadPdfJs();
+        console.log('📖 PDF.js loaded, reading file...');
+        
         const arrayBuffer = await file.arrayBuffer();
-        const pdf = await lib.getDocument({ data: arrayBuffer }).promise;
+        console.log('📖 File read, size:', arrayBuffer.byteLength, 'bytes');
+        
+        const pdf = await lib.getDocument({ 
+            data: arrayBuffer,
+            verbosity: 0 // Suppress warnings
+        }).promise;
+        
+        console.log('📖 PDF loaded, pages:', pdf.numPages);
         
         let fullText = '';
         
         // Extract text from all pages
         for (let i = 1; i <= pdf.numPages; i++) {
+            console.log(`📖 Extracting text from page ${i}/${pdf.numPages}...`);
             const page = await pdf.getPage(i);
             const textContent = await page.getTextContent();
+            
+            // More robust text extraction
             const pageText = textContent.items
-                .map((item: any) => item.str)
+                .map((item: any) => {
+                    // Handle different text item formats
+                    if (typeof item === 'string') {
+                        return item;
+                    }
+                    if (item.str) {
+                        return item.str;
+                    }
+                    if (item.text) {
+                        return item.text;
+                    }
+                    return '';
+                })
+                .filter((text: string) => text && text.trim().length > 0)
                 .join(' ');
-            fullText += pageText + '\n';
+            
+            if (pageText.trim().length > 0) {
+                fullText += pageText + '\n';
+                console.log(`📖 Page ${i} extracted ${pageText.length} characters`);
+            } else {
+                console.warn(`⚠️ Page ${i} had no extractable text`);
+            }
         }
         
-        return fullText;
+        const trimmedText = fullText.trim();
+        console.log('📖 Total extracted text length:', trimmedText.length);
+        
+        if (trimmedText.length < 10) {
+            console.error('❌ Warning: Very little text extracted from PDF. This might be a scanned/image-based PDF.');
+        }
+        
+        return trimmedText;
     } catch (err) {
-        console.error('Error extracting text from PDF:', err);
+        console.error('❌ Error extracting text from PDF:', err);
+        if (err instanceof Error) {
+            console.error('Error message:', err.message);
+            console.error('Error stack:', err.stack);
+        }
+        
+        // Save error to Firebase
+        try {
+            const { saveErrorLog } = await import('./firebase');
+            await saveErrorLog(err instanceof Error ? err : new Error(String(err)), {
+                errorType: 'PDF_TEXT_EXTRACTION',
+                fileName: file.name,
+                fileSize: file.size,
+            });
+        } catch (logError) {
+            console.error('Failed to log error to Firebase:', logError);
+        }
+        
         return '';
     }
 }

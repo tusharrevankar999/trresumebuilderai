@@ -4,9 +4,11 @@ import { formatSize } from '../lib/utils'
 
 interface FileUploaderProps {
     onFileSelect?: (file: File | null) => void;
+    accept?: string; // e.g., ".pdf,.docx,.doc,.txt"
+    hasError?: boolean;
 }
 
-const FileUploader = ({ onFileSelect }: FileUploaderProps) => {
+const FileUploader = ({ onFileSelect, accept = ".pdf", hasError = false }: FileUploaderProps) => {
     const onDrop = useCallback((acceptedFiles: File[]) => {
         const file = acceptedFiles[0] || null;
 
@@ -15,10 +17,29 @@ const FileUploader = ({ onFileSelect }: FileUploaderProps) => {
 
     const maxFileSize = 20 * 1024 * 1024; // 20MB in bytes
 
+    // Parse accept string into dropzone format
+    const getAcceptObject = () => {
+        const extensions = accept.split(',').map(ext => ext.trim().replace('.', ''));
+        const acceptObj: Record<string, string[]> = {};
+        
+        extensions.forEach(ext => {
+            if (ext === 'pdf') {
+                acceptObj['application/pdf'] = ['.pdf'];
+            } else if (ext === 'docx' || ext === 'doc') {
+                acceptObj['application/vnd.openxmlformats-officedocument.wordprocessingml.document'] = ['.docx'];
+                acceptObj['application/msword'] = ['.doc'];
+            } else if (ext === 'txt') {
+                acceptObj['text/plain'] = ['.txt'];
+            }
+        });
+        
+        return acceptObj;
+    };
+
     const {getRootProps, getInputProps, isDragActive, acceptedFiles} = useDropzone({
         onDrop,
         multiple: false,
-        accept: { 'application/pdf': ['.pdf']},
+        accept: getAcceptObject(),
         maxSize: maxFileSize,
     })
 
@@ -27,7 +48,7 @@ const FileUploader = ({ onFileSelect }: FileUploaderProps) => {
 
 
     return (
-        <div className="w-full gradient-border">
+        <div className={`w-full gradient-border ${hasError ? 'border-2 border-red-300 bg-red-50' : ''}`}>
             <div {...getRootProps()}>
                 <input {...getInputProps()} />
 
@@ -61,7 +82,9 @@ const FileUploader = ({ onFileSelect }: FileUploaderProps) => {
                                     Click to upload
                                 </span> or drag and drop
                             </p>
-                            <p className="text-lg text-gray-500">PDF (max {formatSize(maxFileSize)})</p>
+                            <p className="text-lg text-gray-500">
+                                {accept.split(',').map(ext => ext.trim().toUpperCase()).join(', ')} (max {formatSize(maxFileSize)})
+                            </p>
                         </div>
                     )}
                 </div>

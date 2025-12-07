@@ -4,3 +4,13 @@
 # React Router
 /.react-router/
 /build/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+.env.production
+.env.development
+
+# Setup documentation
+HUGGINGFACE_SETUP.md

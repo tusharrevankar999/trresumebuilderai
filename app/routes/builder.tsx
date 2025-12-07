@@ -1,10 +1,17 @@
 import {Link, useNavigate} from "react-router";
-import {useState, useEffect} from "react";
+import {useState, useEffect, useRef} from "react";
 import FileUploader from "~/components/FileUploader";
 import {convertPdfToImage, extractTextFromPdf} from "~/lib/pdf2img";
+import {parseResumeWithGemini} from "~/lib/gemini";
+import AIFeatures, { AIBulletButtons } from "~/components/AIFeatures";
+import {generateSummary, generateBulletPoints, improveText, quantifyAchievement} from "~/lib/ai-features";
+import jsPDF from "jspdf";
+import html2canvas from "html2canvas";
+import {saveResumeRecord} from "~/lib/firebase";
+import {Timestamp} from "firebase/firestore";
 
 export const meta = () => ([
-    { title: 'Resumind | Resume Builder' },
+    { title: 'ResumeAI | Resume Builder' },
     { name: 'description', content: 'Build professional resumes with AI assistance' },
 ])
 
@@ -51,13 +58,17 @@ interface ResumeData {
 
 const Builder = () => {
     const navigate = useNavigate();
+    const resumePreviewRef = useRef<HTMLDivElement>(null);
     const [uploadedFile, setUploadedFile] = useState<File | null>(null);
     const [resumeImageUrl, setResumeImageUrl] = useState<string>('');
     const [resumePdfUrl, setResumePdfUrl] = useState<string>('');
     const [isConvertingPdf, setIsConvertingPdf] = useState(false);
+    const [isParsing, setIsParsing] = useState(false);
     const [professionalResumeImageUrl, setProfessionalResumeImageUrl] = useState<string>('');
-    const [selectedTemplate, setSelectedTemplate] = useState<string>('modern-professional');
+    const [selectedTemplate, setSelectedTemplate] = useState<string>('modern-classic');
     const [activeSection, setActiveSection] = useState<string>('personal');
+    const [isExporting, setIsExporting] = useState(false);
+    const [resumeRecordId, setResumeRecordId] = useState<string | null>(null); // Track Firebase document ID
     const [resumeData, setResumeData] = useState<ResumeData>({
         personalInfo: {
             fullName: '',
@@ -97,6 +108,69 @@ const Builder = () => {
         achievements: [{
             name: ''
         }]
+    });
+
+    // ---- Demo/Sample content for "Modern Professional" template ----
+    const getModernProfessionalSample = (): ResumeData => ({
+        personalInfo: {
+            fullName: 'John Smith',
+            email: 'john.smith@email.com',
+            phone: '+1 (555) 123-4567',
+            location: 'San Francisco, CA',
+            linkedin: 'linkedin.com/in/johnsmith',
+            portfolio: 'github.com/johnsmith'
+        },
+        summary:
+            'Results‑driven Software Engineer with 5+ years of experience building scalable web applications. Specialized in React, Node.js, and cloud technologies with a proven track record of delivering high‑impact projects.',
+        experience: [
+            {
+                company: 'Tech Corp',
+                position: 'Senior Software Engineer',
+                startDate: 'Jan 2021',
+                endDate: 'Present',
+                location: 'San Francisco, CA',
+                current: true,
+                description: [
+                    'Led development of microservices architecture serving 10M+ users, improving system reliability by 40%.',
+                    'Reduced deployment time by 60% through implementation of CI/CD pipelines.',
+                    'Mentored a team of 5 junior engineers, improving code quality and review practices.'
+                ]
+            }
+        ],
+        education: [
+            {
+                degree: 'Bachelor of Science',
+                school: 'University of California',
+                gpa: '3.8/4.0',
+                graduationDate: 'May 2019',
+                // optional fields kept default/empty
+            }
+        ],
+        skills: {
+            technical: [
+                'JavaScript',
+                'TypeScript',
+                'React',
+                'Node.js',
+                'Python',
+                'AWS',
+                'Docker',
+                'PostgreSQL'
+            ],
+            soft: ['Leadership', 'Problem Solving', 'Communication']
+        },
+        projects: [
+            {
+                name: 'E‑commerce Platform',
+                description:
+                    'Built full‑stack platform processing $1M+ in monthly transactions. Integrated payments, search, and analytics. Tech: React, Node.js, MongoDB, Stripe.'
+            }
+        ],
+        certifications: [{ name: 'AWS Certified Solutions Architect' }],
+        achievements: [
+            { name: 'Hackathon Winner 2022' },
+            { name: 'Employee of the Quarter Q3 2023' }
+        ]
     });
 
     // Parse extracted text and populate form fields
@@ -285,31 +359,180 @@ const Builder = () => {
     // Convert PDF to image and extract text when file is uploaded
     useEffect(() => {
         const convertPdf = async () => {
+            console.log('🔄 useEffect triggered, uploadedFile:', uploadedFile?.name || 'null');
             if (uploadedFile) {
+                console.log('📁 Processing uploaded file:', uploadedFile.name, uploadedFile.size, 'bytes');
                 setIsConvertingPdf(true);
                 try {
                     // Create PDF URL for download
                     const pdfBlob = new Blob([uploadedFile], { type: 'application/pdf' });
                     const pdfUrl = URL.createObjectURL(pdfBlob);
                     setResumePdfUrl(pdfUrl);
+                    console.log('✅ PDF URL created');
 
                     // Convert to image for display
                     const result = await convertPdfToImage(uploadedFile);
                     if (result.imageUrl) {
                         setResumeImageUrl(result.imageUrl);
+                        console.log('✅ PDF converted to image');
                     }
 
-                    // Extract text and populate form
+                    // Extract text and populate form using Gemini AI
+                    console.log('📝 Starting text extraction...');
+                    setIsParsing(true);
                     const extractedText = await extractTextFromPdf(uploadedFile);
-                    if (extractedText) {
-                        parseResumeText(extractedText);
+                    console.log('📄 Extracted resume text length:', extractedText?.length || 0);
+                    console.log('📄 First 300 chars of extracted text:', extractedText?.substring(0, 300));
+                    
+                    // Validate that we actually extracted meaningful text (at least 50 characters)
+                    if (extractedText && extractedText.trim().length > 50) {
+                        console.log('✅ Text extraction successful, proceeding with AI parsing');
+                        console.log('🤖 Calling AI to parse resume...');
+                        console.log('📤 Sending to parseResumeWithGemini, text length:', extractedText.length);
+                        try {
+                            const geminiParsed = await parseResumeWithGemini(extractedText);
+                            console.log('📥 Received response from parseResumeWithGemini:', geminiParsed ? 'SUCCESS' : 'NULL');
+                            if (geminiParsed) {
+                                console.log('✅ AI parsing successful:', {
+                                    name: geminiParsed.personalInfo?.fullName,
+                                    email: geminiParsed.personalInfo?.email
+                                });
+                                // Use Gemini parsed data
+                                setResumeData(prev => ({
+                                    ...prev,
+                                    personalInfo: {
+                                        fullName: geminiParsed.personalInfo.fullName || prev.personalInfo.fullName,
+                                        email: geminiParsed.personalInfo.email || prev.personalInfo.email,
+                                        phone: geminiParsed.personalInfo.phone || prev.personalInfo.phone,
+                                        location: geminiParsed.personalInfo.location || prev.personalInfo.location,
+                                        linkedin: geminiParsed.personalInfo.linkedin || prev.personalInfo.linkedin,
+                                        portfolio: geminiParsed.personalInfo.portfolio || prev.personalInfo.portfolio
+                                    },
+                                    summary: geminiParsed.summary || prev.summary,
+                                    experience: geminiParsed.experience.length > 0 ? geminiParsed.experience : prev.experience,
+                                    education: geminiParsed.education.length > 0 ? geminiParsed.education : prev.education,
+                                    skills: {
+                                        technical: geminiParsed.skills.technical.length > 0 ? geminiParsed.skills.technical : prev.skills.technical,
+                                        soft: geminiParsed.skills.soft.length > 0 ? geminiParsed.skills.soft : prev.skills.soft
+                                    },
+                                    projects: geminiParsed.projects.length > 0 ? geminiParsed.projects : prev.projects,
+                                    certifications: geminiParsed.certifications.length > 0 ? geminiParsed.certifications : prev.certifications,
+                                    achievements: geminiParsed.achievements.length > 0 ? geminiParsed.achievements : prev.achievements
+                                }));
+                                
+                                // Save resume record when data is parsed (not downloaded yet)
+                                try {
+                                    const updatedResumeData = {
+                                        ...resumeData,
+                                        personalInfo: {
+                                            fullName: geminiParsed.personalInfo.fullName || resumeData.personalInfo.fullName,
+                                            email: geminiParsed.personalInfo.email || resumeData.personalInfo.email,
+                                            phone: geminiParsed.personalInfo.phone || resumeData.personalInfo.phone,
+                                            location: geminiParsed.personalInfo.location || resumeData.personalInfo.location,
+                                            linkedin: geminiParsed.personalInfo.linkedin || resumeData.personalInfo.linkedin,
+                                            portfolio: geminiParsed.personalInfo.portfolio || resumeData.personalInfo.portfolio
+                                        },
+                                        summary: geminiParsed.summary || resumeData.summary,
+                                        experience: geminiParsed.experience.length > 0 ? geminiParsed.experience : resumeData.experience,
+                                        education: geminiParsed.education.length > 0 ? geminiParsed.education : resumeData.education,
+                                        skills: {
+                                            technical: geminiParsed.skills.technical.length > 0 ? geminiParsed.skills.technical : resumeData.skills.technical,
+                                            soft: geminiParsed.skills.soft.length > 0 ? geminiParsed.skills.soft : resumeData.skills.soft
+                                        },
+                                        projects: geminiParsed.projects.length > 0 ? geminiParsed.projects : resumeData.projects,
+                                        certifications: geminiParsed.certifications.length > 0 ? geminiParsed.certifications : resumeData.certifications,
+                                        achievements: geminiParsed.achievements.length > 0 ? geminiParsed.achievements : resumeData.achievements
+                                    };
+                                    
+                                    // Only save if we have meaningful data
+                                    if (updatedResumeData.personalInfo.fullName || updatedResumeData.personalInfo.email) {
+                                        console.log('💾 Saving resume record to Firebase (created, not downloaded)...');
+                                        const docId = await saveResumeRecord({
+                                            fullName: updatedResumeData.personalInfo.fullName,
+                                            email: updatedResumeData.personalInfo.email,
+                                            phone: updatedResumeData.personalInfo.phone,
+                                            location: updatedResumeData.personalInfo.location,
+                                            summary: updatedResumeData.summary,
+                                            experience: updatedResumeData.experience,
+                                            education: updatedResumeData.education,
+                                            skills: updatedResumeData.skills,
+                                            projects: updatedResumeData.projects,
+                                            certifications: updatedResumeData.certifications,
+                                            achievements: updatedResumeData.achievements,
+                                            template: selectedTemplate,
+                                        }, false); // isDownload = false
+                                        
+                                        if (docId) {
+                                            setResumeRecordId(docId);
+                                            console.log('✅ Resume record saved (created) with ID:', docId);
+                                        }
+                                    }
+                                } catch (saveError) {
+                                    console.error('❌ Error saving resume record on parse:', saveError);
+                                }
+                            } else {
+                                console.warn('⚠️ AI parsing returned null, falling back to regex parsing');
+                                // Fallback to regex parsing if Gemini fails
+                                parseResumeText(extractedText);
+                            }
+                        } catch (aiError) {
+                            console.error('❌ Error calling AI parsing:', aiError);
+                            
+                            // Save error to Firebase
+                            try {
+                                const { saveErrorLog } = await import('~/lib/firebase');
+                                await saveErrorLog(aiError instanceof Error ? aiError : new Error(String(aiError)), {
+                                    errorType: 'AI_PARSING_CALL_ERROR',
+                                    textLength: extractedText.length,
+                                    fileName: uploadedFile.name,
+                                    page: 'builder',
+                                    action: 'parseResumeWithGemini',
+                                });
+                            } catch (logError) {
+                                console.error('Failed to log error to Firebase:', logError);
+                            }
+                            
+                            // Fallback to regex parsing if AI call fails
+                            parseResumeText(extractedText);
+                        }
+                    } else {
+                        const textLength = extractedText?.trim().length || 0;
+                        console.error('❌ Text extraction failed or insufficient text extracted');
+                        console.error('📊 Extracted text length:', textLength);
+                        console.error('⚠️ Cannot call AI with insufficient text. This might be a scanned/image-based PDF.');
+                        console.error('💡 Suggestion: Try using a PDF with selectable text, or use OCR to convert scanned PDFs first.');
+                        
+                        // Still try regex parsing as fallback even with minimal text
+                        if (extractedText && textLength > 0) {
+                            console.log('🔄 Attempting regex parsing as fallback...');
+                            parseResumeText(extractedText);
+                        }
                     }
+                    setIsParsing(false);
+                    console.log('✅ Finished processing PDF');
                 } catch (error) {
-                    console.error('Error processing PDF:', error);
+                    console.error('❌ Error processing PDF:', error);
+                    console.error('Error details:', error instanceof Error ? error.message : error);
+                    setIsParsing(false);
+                    
+                    // Save error to Firebase
+                    try {
+                        const { saveErrorLog } = await import('~/lib/firebase');
+                        await saveErrorLog(error instanceof Error ? error : new Error(String(error)), {
+                            errorType: 'PDF_PROCESSING',
+                            fileName: uploadedFile.name,
+                            fileSize: uploadedFile.size,
+                            page: 'builder',
+                            action: 'convertPdf',
+                        });
+                    } catch (logError) {
+                        console.error('Failed to log error to Firebase:', logError);
+                    }
                 } finally {
                     setIsConvertingPdf(false);
                 }
             } else {
+                console.log('ℹ️ No file uploaded yet');
                 setResumeImageUrl('');
                 setResumePdfUrl('');
             }
@@ -317,6 +540,27 @@ const Builder = () => {
 
         convertPdf();
     }, [uploadedFile]);
+
+    // When user selects "Modern Professional" and form is empty (no user/parsed data and no upload),
+    // prefill with a polished sample so the preview looks like the shared screenshot.
+    useEffect(() => {
+        if (
+            selectedTemplate === 'modern-classic' &&
+            !hasFormData() &&
+            !uploadedFile &&
+            !isConvertingPdf
+        ) {
+            setResumeData(prev => {
+                // Only prefill if still empty at the moment of applying
+                const empty =
+                    !prev.personalInfo?.fullName &&
+                    !prev.summary &&
+                    !(prev.experience && prev.experience[0] && prev.experience[0].company);
+                return empty ? getModernProfessionalSample() : prev;
+            });
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [selectedTemplate, isConvertingPdf, uploadedFile]);
 
     // Load and convert Professional CV Resume.pdf to image on mount
     useEffect(() => {
@@ -507,28 +751,28 @@ const Builder = () => {
 
     const templates = [
         {
-            id: 'modern-professional',
-            name: 'Modern Professional',
-            description: 'Clean and ATS-friendly',
+            id: 'modern-classic',
+            name: 'Modern Classic',
+            description: 'Rezi-style - 100% ATS-safe, Microsoft/Amazon favorite',
             previewBg: 'bg-white'
         },
         {
-            id: 'tech-company',
-            name: 'Tech Company Style',
-            description: 'Colorful accents (Google/Meta)',
-            previewBg: 'bg-gradient-to-r from-blue-100 to-yellow-100'
+            id: 'creative-pro',
+            name: 'Creative Pro',
+            description: 'Apple/Meta style - subtle navy accents, professional',
+            previewBg: 'bg-gradient-to-r from-blue-50 to-indigo-50'
         },
         {
-            id: 'corporate-professional',
-            name: 'Corporate Professional',
-            description: 'Professional blue theme (Microsoft)',
-            previewBg: 'bg-gradient-to-b from-blue-200 to-blue-100'
+            id: 'executive-onepage',
+            name: 'Executive One-Page',
+            description: 'Bold headings, IBM/Accenture style',
+            previewBg: 'bg-gradient-to-b from-slate-50 to-gray-50'
         },
         {
-            id: 'creative-modern',
-            name: 'Creative Modern',
-            description: 'Stand out design',
-            previewBg: 'bg-gradient-to-b from-purple-200 to-purple-100'
+            id: 'minimalist-clean',
+            name: 'Minimalist Clean',
+            description: 'Google/FANG favorite - ultra-clean grayscale',
+            previewBg: 'bg-gradient-to-b from-gray-50 to-white'
         }
     ];
 
@@ -541,41 +785,134 @@ const Builder = () => {
         { id: 'projects', label: 'Projects' },
         { id: 'certifications', label: 'Certifications' },
         { id: 'achievements', label: 'Achievements' },
+        { id: 'ai-tools', label: '✨ AI Tools' },
     ];
 
     const getTemplateStyles = () => {
         switch (selectedTemplate) {
-            case 'tech-company':
+            case 'creative-pro':
+                // Apple/Meta style - San Francisco/Helvetica, modern spacing, navy accents
                 return {
-                    headerBorder: 'border-b-2 border-blue-400',
-                    headerText: 'text-blue-600',
-                    sectionHeader: 'text-blue-600',
-                    sectionBorder: 'border-blue-600',
-                    accent: 'bg-blue-50'
+                    fontFamily: 'font-sans', // Uses system font stack (SF Pro on Mac, Helvetica)
+                    fontFamilyStyle: { fontFamily: '"Helvetica Neue", Helvetica, Arial, sans-serif' },
+                    headerBorder: 'border-b-2 border-indigo-700',
+                    headerText: 'text-indigo-800',
+                    sectionHeader: 'text-indigo-700',
+                    sectionBorder: 'border-indigo-600',
+                    accent: 'bg-indigo-50',
+                    contactText: 'text-gray-700',
+                    bodyText: 'text-gray-800',
+                    skillBg: 'bg-indigo-100',
+                    skillText: 'text-indigo-800',
+                    nameSize: 'text-3xl',
+                    nameWeight: 'font-semibold',
+                    nameSpacing: 'tracking-tight',
+                    sectionSize: 'text-xs',
+                    sectionWeight: 'font-bold',
+                    sectionLetterSpacing: 'tracking-wider',
+                    bodySize: 'text-sm',
+                    bodyWeight: 'font-normal',
+                    bodyLineHeight: 'leading-relaxed',
+                    borderWidth: 'border-b-2',
+                    containerPadding: 'p-8',
+                    sectionSpacing: 'space-y-4',
+                    itemSpacing: 'space-y-2',
+                    skillLayout: 'flex-wrap', // Single row
+                    contactSize: 'text-xs',
+                    contactSpacing: 'gap-2'
                 };
-            case 'corporate-professional':
+            case 'executive-onepage':
+                // IBM/Accenture style - Times New Roman/Serif, formal, bold headings
                 return {
-                    headerBorder: 'border-b-2 border-blue-600',
-                    headerText: 'text-blue-700',
-                    sectionHeader: 'text-blue-700',
-                    sectionBorder: 'border-blue-700',
-                    accent: 'bg-blue-50'
+                    fontFamily: 'font-serif',
+                    fontFamilyStyle: { fontFamily: '"Merriweather", "Times New Roman", Times, serif' },
+                    headerBorder: 'border-b-4 border-slate-800',
+                    headerText: 'text-slate-900',
+                    sectionHeader: 'text-slate-800',
+                    sectionBorder: 'border-slate-700',
+                    accent: 'bg-slate-100',
+                    contactText: 'text-gray-700',
+                    bodyText: 'text-gray-800',
+                    skillBg: 'bg-slate-200',
+                    skillText: 'text-slate-800',
+                    nameSize: 'text-4xl',
+                    nameWeight: 'font-bold',
+                    nameSpacing: 'tracking-normal',
+                    sectionSize: 'text-sm',
+                    sectionWeight: 'font-bold',
+                    sectionLetterSpacing: 'tracking-wide',
+                    bodySize: 'text-sm',
+                    bodyWeight: 'font-normal',
+                    bodyLineHeight: 'leading-normal',
+                    borderWidth: 'border-b-4',
+                    containerPadding: 'p-10',
+                    sectionSpacing: 'space-y-5',
+                    itemSpacing: 'space-y-3',
+                    skillLayout: 'flex-wrap', // Single row
+                    contactSize: 'text-sm',
+                    contactSpacing: 'gap-3'
                 };
-            case 'creative-modern':
+            case 'minimalist-clean':
+                // Google/FANG favorite - Roboto, ultra-clean, generous spacing
                 return {
-                    headerBorder: 'border-b-2 border-purple-400',
-                    headerText: 'text-purple-600',
-                    sectionHeader: 'text-purple-600',
-                    sectionBorder: 'border-purple-600',
-                    accent: 'bg-purple-50'
-                };
-            default: // modern-professional
-                return {
+                    fontFamily: 'font-sans',
+                    fontFamilyStyle: { fontFamily: '"Roboto", "Open Sans", Arial, sans-serif' },
                     headerBorder: 'border-b border-gray-300',
                     headerText: 'text-gray-900',
+                    sectionHeader: 'text-gray-700',
+                    sectionBorder: 'border-gray-400',
+                    accent: 'bg-white',
+                    contactText: 'text-gray-600',
+                    bodyText: 'text-gray-700',
+                    skillBg: 'bg-gray-100',
+                    skillText: 'text-gray-700',
+                    nameSize: 'text-3xl',
+                    nameWeight: 'font-light',
+                    nameSpacing: 'tracking-wide',
+                    sectionSize: 'text-xs',
+                    sectionWeight: 'font-medium',
+                    sectionLetterSpacing: 'tracking-widest',
+                    bodySize: 'text-sm',
+                    bodyWeight: 'font-light',
+                    bodyLineHeight: 'leading-loose',
+                    borderWidth: 'border-b',
+                    containerPadding: 'p-12',
+                    sectionSpacing: 'space-y-6',
+                    itemSpacing: 'space-y-4',
+                    skillLayout: 'grid grid-cols-2 gap-2', // Two-column for skills
+                    contactSize: 'text-sm',
+                    contactSpacing: 'gap-4'
+                };
+            default: // modern-classic
+                // Microsoft/Amazon style - Arial/Calibri, classic, ATS-optimized
+                return {
+                    fontFamily: 'font-sans',
+                    fontFamilyStyle: { fontFamily: 'Arial, "Helvetica Neue", Helvetica, sans-serif' },
+                    headerBorder: 'border-b-2 border-gray-400',
+                    headerText: 'text-gray-900',
                     sectionHeader: 'text-gray-900',
-                    sectionBorder: 'border-gray-900',
-                    accent: 'bg-gray-50'
+                    sectionBorder: 'border-gray-500',
+                    accent: 'bg-gray-50',
+                    contactText: 'text-gray-700',
+                    bodyText: 'text-gray-800',
+                    skillBg: 'bg-gray-200',
+                    skillText: 'text-gray-800',
+                    nameSize: 'text-3xl',
+                    nameWeight: 'font-bold',
+                    nameSpacing: 'tracking-normal',
+                    sectionSize: 'text-xs',
+                    sectionWeight: 'font-bold',
+                    sectionLetterSpacing: 'tracking-wider',
+                    bodySize: 'text-sm',
+                    bodyWeight: 'font-normal',
+                    bodyLineHeight: 'leading-normal',
+                    borderWidth: 'border-b-2',
+                    containerPadding: 'p-10',
+                    sectionSpacing: 'space-y-5',
+                    itemSpacing: 'space-y-2',
+                    skillLayout: 'flex-wrap', // Single row
+                    contactSize: 'text-sm',
+                    contactSpacing: 'gap-3'
                 };
         }
     };
@@ -602,6 +939,673 @@ const Builder = () => {
         );
     };
 
+    // Helper function to capture resume as canvas
+    const captureResumeAsCanvas = async (): Promise<HTMLCanvasElement> => {
+        if (!resumePreviewRef.current) {
+            throw new Error('Resume preview not available');
+        }
+
+        const element = resumePreviewRef.current;
+        
+        // Scroll element into view to ensure it's fully rendered
+        element.scrollIntoView({ behavior: 'instant', block: 'start' });
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        // Clone the element and remove SVG elements before html2canvas processes it
+        const clone = element.cloneNode(true) as HTMLElement;
+        const svgs = clone.querySelectorAll('svg');
+        svgs.forEach(svg => {
+            const parent = svg.parentElement;
+            if (parent) {
+                // Determine icon type from parent context
+                const parentText = parent.textContent || '';
+                const iconText = parentText.includes('@') ? '✉' :
+                               parentText.includes('+') || parentText.match(/\d/) ? '📞' :
+                               parentText.includes('linkedin') ? 'in' :
+                               parentText.includes('github') || parentText.includes('portfolio') ? '🔗' :
+                               '📍';
+                
+                // Replace SVG with simple span
+                const span = document.createElement('span');
+                span.textContent = iconText;
+                span.style.display = 'inline-block';
+                span.style.marginRight = '4px';
+                span.style.width = '16px';
+                span.style.height = '16px';
+                span.style.textAlign = 'center';
+                span.style.fontSize = '14px';
+                span.style.color = 'rgb(0, 0, 0)';
+                parent.replaceChild(span, svg);
+            }
+        });
+        
+        // Temporarily append clone to body (off-screen) for html2canvas
+        clone.style.position = 'absolute';
+        clone.style.left = '-9999px';
+        clone.style.top = '0';
+        clone.style.width = element.offsetWidth + 'px';
+        clone.style.maxWidth = element.offsetWidth + 'px';
+        clone.style.overflow = 'visible';
+        document.body.appendChild(clone);
+        
+        // Wait a moment for styles to apply
+        await new Promise(resolve => setTimeout(resolve, 50));
+        
+        // Capture the cloned element with comprehensive options
+        const canvas = await html2canvas(clone, {
+            scale: 2,
+            useCORS: true,
+            logging: false,
+            backgroundColor: '#ffffff',
+            width: element.scrollWidth,
+            height: element.scrollHeight,
+            windowWidth: element.scrollWidth,
+            windowHeight: element.scrollHeight,
+            scrollX: 0,
+            scrollY: 0,
+            allowTaint: false,
+            removeContainer: false,
+            imageTimeout: 15000,
+            onclone: (clonedDoc, clonedElement) => {
+                // Remove all stylesheets from cloned document to avoid oklch parsing
+                const styleSheets = Array.from(clonedDoc.styleSheets);
+                styleSheets.forEach((sheet) => {
+                    try {
+                        if (sheet.ownerNode) {
+                            sheet.ownerNode.remove();
+                        }
+                    } catch (e) {
+                        // Some stylesheets may not be removable
+                    }
+                });
+                
+                // Remove all style and link tags
+                const styleTags = Array.from(clonedDoc.querySelectorAll('style, link[rel="stylesheet"]'));
+                styleTags.forEach(tag => tag.remove());
+                
+                // Inject comprehensive safe stylesheet with rgb colors only
+                const safeStyle = clonedDoc.createElement('style');
+                safeStyle.textContent = `
+                    * {
+                        box-sizing: border-box;
+                    }
+                    body {
+                        margin: 0;
+                        padding: 0;
+                        font-family: "Mona Sans", ui-sans-serif, system-ui, sans-serif;
+                        background: white;
+                        color: rgb(0, 0, 0);
+                    }
+                    .gradient-border {
+                        background: linear-gradient(to bottom, rgba(193, 211, 248, 0.1), rgba(167, 191, 241, 0.3)) !important;
+                        padding: 2.5rem !important;
+                        border-radius: 1rem !important;
+                    }
+                    .text-gradient {
+                        color: rgb(0, 0, 0) !important;
+                        background: none !important;
+                    }
+                    h1 {
+                        font-size: 1.875rem;
+                        font-weight: 700;
+                        line-height: 1.2;
+                        margin: 0;
+                        color: rgb(17, 24, 39);
+                    }
+                    h2 {
+                        font-size: 0.75rem;
+                        font-weight: 700;
+                        text-transform: uppercase;
+                        margin: 0;
+                        margin-top: 1.25rem;
+                        margin-bottom: 0.75rem;
+                        color: rgb(17, 24, 39);
+                        border-bottom: 1px solid rgb(17, 24, 39);
+                        padding-bottom: 0.25rem;
+                        line-height: 1.5;
+                        display: block;
+                    }
+                    h3 {
+                        font-size: 0.875rem;
+                        font-weight: 600;
+                        margin: 0;
+                        color: rgb(17, 24, 39);
+                    }
+                    p {
+                        margin: 0;
+                        color: rgb(55, 65, 81);
+                        font-size: 0.875rem;
+                        line-height: 1.5;
+                        word-wrap: break-word;
+                        overflow-wrap: break-word;
+                    }
+                    span {
+                        color: inherit;
+                        font-size: inherit;
+                        word-wrap: break-word;
+                        overflow-wrap: break-word;
+                    }
+                    div {
+                        word-wrap: break-word;
+                        overflow-wrap: break-word;
+                    }
+                    ul, ol {
+                        margin: 0;
+                        padding-left: 1.5rem;
+                    }
+                    li {
+                        margin: 0.125rem 0;
+                        color: rgb(55, 65, 81);
+                        font-size: 0.875rem;
+                        line-height: 1.5;
+                    }
+                    .flex {
+                        display: flex;
+                    }
+                    .flex-wrap {
+                        flex-wrap: wrap;
+                    }
+                    .items-center {
+                        align-items: center;
+                    }
+                    .gap-2 {
+                        gap: 0.5rem;
+                    }
+                    .gap-3 {
+                        gap: 0.75rem;
+                    }
+                    .space-y-3 > * + * {
+                        margin-top: 0.75rem;
+                    }
+                    .space-y-4 > * + * {
+                        margin-top: 1rem;
+                    }
+                    .space-y-5 > * + * {
+                        margin-top: 1.25rem;
+                    }
+                    .mb-1 {
+                        margin-bottom: 0.25rem;
+                    }
+                    .mb-2 {
+                        margin-bottom: 0.5rem;
+                    }
+                    .mb-3 {
+                        margin-bottom: 0.75rem;
+                    }
+                    .mt-2 {
+                        margin-top: 0.5rem;
+                    }
+                    .mt-3 {
+                        margin-top: 0.75rem;
+                    }
+                    .pb-3 {
+                        padding-bottom: 0.75rem;
+                    }
+                    .px-3 {
+                        padding-left: 0.75rem;
+                        padding-right: 0.75rem;
+                    }
+                    .py-1 {
+                        padding-top: 0.25rem;
+                        padding-bottom: 0.25rem;
+                    }
+                    .bg-gray-100 {
+                        background-color: rgb(243, 244, 246);
+                    }
+                    .rounded {
+                        border-radius: 0.25rem;
+                    }
+                    .text-sm {
+                        font-size: 0.875rem;
+                    }
+                    .text-gray-700 {
+                        color: rgb(55, 65, 81);
+                    }
+                    .text-gray-900 {
+                        color: rgb(17, 24, 39);
+                    }
+                    .text-gray-600 {
+                        color: rgb(75, 85, 99);
+                    }
+                    .font-bold {
+                        font-weight: 700;
+                    }
+                    .font-semibold {
+                        font-weight: 600;
+                    }
+                    .font-medium {
+                        font-weight: 500;
+                    }
+                    .justify-between {
+                        justify-content: space-between;
+                    }
+                    .text-right {
+                        text-align: right;
+                    }
+                    .leading-relaxed {
+                        line-height: 1.625;
+                    }
+                `;
+                clonedDoc.head.appendChild(safeStyle);
+                
+                // Copy ALL computed styles as inline styles for all elements to preserve exact appearance
+                const allElements = clonedDoc.querySelectorAll('*');
+                const originalElements = clone.querySelectorAll('*');
+                
+                allElements.forEach((clonedEl, index) => {
+                    if (index < originalElements.length) {
+                        const originalEl = originalElements[index] as HTMLElement;
+                        const htmlEl = clonedEl as HTMLElement;
+                        
+                        try {
+                            const computed = window.getComputedStyle(originalEl);
+                            
+                            // Copy comprehensive list of all CSS properties
+                            const allProps = [
+                                // Typography
+                                'color', 'fontSize', 'fontWeight', 'fontFamily', 'fontStyle', 
+                                'textDecoration', 'textTransform', 'letterSpacing', 'lineHeight',
+                                'textAlign', 'whiteSpace', 'wordWrap', 'textOverflow',
+                                // Spacing
+                                'padding', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft',
+                                'margin', 'marginTop', 'marginRight', 'marginBottom', 'marginLeft',
+                                // Layout
+                                'display', 'position', 'top', 'right', 'bottom', 'left',
+                                'width', 'height', 'minWidth', 'minHeight', 'maxWidth', 'maxHeight',
+                                'flex', 'flexDirection', 'flexWrap', 'flexGrow', 'flexShrink', 'flexBasis',
+                                'justifyContent', 'alignItems', 'alignSelf', 'alignContent',
+                                'gap', 'rowGap', 'columnGap',
+                                'grid', 'gridTemplateColumns', 'gridTemplateRows', 'gridColumn', 'gridRow',
+                                // Borders & Background
+                                'border', 'borderTop', 'borderRight', 'borderBottom', 'borderLeft',
+                                'borderWidth', 'borderStyle', 'borderColor', 'borderRadius',
+                                'backgroundColor', 'background', 'backgroundImage', 'backgroundSize',
+                                'backgroundPosition', 'backgroundRepeat',
+                                // Visual
+                                'opacity', 'visibility', 'overflow', 'overflowX', 'overflowY',
+                                'boxShadow', 'textShadow', 'transform', 'transformOrigin',
+                                // Text overflow
+                                'wordWrap', 'overflowWrap', 'wordBreak', 'textOverflow',
+                                // Other
+                                'zIndex', 'cursor', 'listStyle', 'listStyleType', 'listStylePosition'
+                            ];
+                            
+                            allProps.forEach(prop => {
+                                try {
+                                    let value = computed.getPropertyValue(prop);
+                                    
+                                    // Replace any oklch values with rgb equivalents
+                                    if (value && value.includes('oklch')) {
+                                        if (prop === 'color') {
+                                            // Try to preserve color intent - use gray for text
+                                            value = 'rgb(55, 65, 81)';
+                                        } else if (prop === 'backgroundColor') {
+                                            value = 'transparent';
+                                        } else if (prop === 'borderColor') {
+                                            value = 'rgb(229, 231, 235)';
+                                        } else {
+                                            value = '';
+                                        }
+                                    }
+                                    
+                                    // Ensure text doesn't get cut off
+                                    if (prop === 'overflow' && (value === 'hidden' || value === 'clip')) {
+                                        value = 'visible';
+                                    }
+                                    if (prop === 'overflowX' && (value === 'hidden' || value === 'clip')) {
+                                        value = 'visible';
+                                    }
+                                    if (prop === 'overflowY' && (value === 'hidden' || value === 'clip')) {
+                                        value = 'visible';
+                                    }
+                                    
+                                    // Ensure word wrapping for text elements
+                                    if (['p', 'span', 'div', 'li'].includes(htmlEl.tagName.toLowerCase()) && 
+                                        !value && (prop === 'wordWrap' || prop === 'overflowWrap')) {
+                                        value = 'break-word';
+                                    }
+                                    
+                                    // Only set non-empty, non-default values
+                                    if (value && value.trim() !== '' && value !== 'none' && value !== 'normal') {
+                                        htmlEl.style.setProperty(prop, value);
+                                    }
+                                } catch (e) {
+                                    // Ignore individual property errors
+                                }
+                            });
+                            
+                            // Ensure elements with text have proper width constraints
+                            if (['p', 'span', 'div', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'].includes(htmlEl.tagName.toLowerCase())) {
+                                const computedWidth = computed.getPropertyValue('width');
+                                if (!computedWidth || computedWidth === 'auto' || computedWidth === '0px') {
+                                    htmlEl.style.maxWidth = '100%';
+                                }
+                                htmlEl.style.wordWrap = 'break-word';
+                                htmlEl.style.overflowWrap = 'break-word';
+                            }
+                        } catch (e) {
+                            // Ignore errors for this element
+                        }
+                    }
+                });
+            }
+        });
+        
+        // Clean up clone
+        document.body.removeChild(clone);
+        
+        return canvas;
+    };
+
+    const handleExportPdf = async () => {
+        if (!resumePreviewRef.current) {
+            alert('Resume preview not available for export');
+            return;
+        }
+
+        setIsExporting(true);
+        try {
+            const canvas = await captureResumeAsCanvas();
+            const imgData = canvas.toDataURL('image/png');
+            
+            // Calculate PDF dimensions (A4 size)
+            const pdfWidth = 210; // A4 width in mm
+            const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+            
+            // Create PDF
+            const pdf = new jsPDF({
+                orientation: pdfHeight > pdfWidth ? 'portrait' : 'landscape',
+                unit: 'mm',
+                format: [pdfWidth, pdfHeight]
+            });
+
+            pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+            
+            // Generate filename
+            const fileName = resumeData.personalInfo.fullName 
+                ? `${resumeData.personalInfo.fullName.replace(/\s+/g, '_')}_Resume.pdf`
+                : 'Resume.pdf';
+            
+            // Save PDF to user's device
+            pdf.save(fileName);
+
+            // Save or update resume record to Firebase (data only, no file upload)
+            try {
+                console.log("🔄 Starting Firebase save for PDF export...");
+                console.log("📋 Resume data:", {
+                    fullName: resumeData.personalInfo.fullName,
+                    email: resumeData.personalInfo.email,
+                    template: selectedTemplate,
+                    hasExperience: resumeData.experience?.length > 0,
+                    hasEducation: resumeData.education?.length > 0,
+                    existingRecordId: resumeRecordId
+                });
+                
+                // Update existing record if it exists, otherwise create new one
+                const docId = await saveResumeRecord({
+                    fullName: resumeData.personalInfo.fullName,
+                    email: resumeData.personalInfo.email,
+                    phone: resumeData.personalInfo.phone,
+                    location: resumeData.personalInfo.location,
+                    summary: resumeData.summary,
+                    experience: resumeData.experience,
+                    education: resumeData.education,
+                    skills: resumeData.skills,
+                    projects: resumeData.projects,
+                    certifications: resumeData.certifications,
+                    achievements: resumeData.achievements,
+                    template: selectedTemplate,
+                    exportFormat: 'PDF',
+                }, true, resumeRecordId || undefined); // isDownload = true, update existing if recordId exists
+                
+                if (docId) {
+                    setResumeRecordId(docId); // Store the ID for future updates
+                    console.log("✅ Resume saved/updated to Firebase with ID:", docId);
+                    console.log("📍 Check Firebase Console: users/" + (resumeData.personalInfo.email || 'anonymous') + "/cvs/" + docId);
+                } else {
+                    console.error("❌ Failed to save resume to Firebase! Check console for errors above.");
+                    alert("⚠️ Resume downloaded but failed to save to database. Check console for details.");
+                }
+            } catch (firebaseError: any) {
+                console.error("❌ Firebase save error (non-blocking):", firebaseError);
+                console.error("Error details:", {
+                    code: firebaseError?.code,
+                    message: firebaseError?.message,
+                    stack: firebaseError?.stack
+                });
+                alert("⚠️ Error saving to Firebase: " + (firebaseError?.message || "Unknown error"));
+            }
+        } catch (error) {
+            console.error('Error exporting PDF:', error);
+            alert('Failed to export resume. Please try again.');
+        } finally {
+            setIsExporting(false);
+        }
+    };
+
+    const handleExportPng = async () => {
+        if (!resumePreviewRef.current) {
+            alert('Resume preview not available for export');
+            return;
+        }
+
+        setIsExporting(true);
+        try {
+            const canvas = await captureResumeAsCanvas();
+            const imgData = canvas.toDataURL('image/png');
+            
+            // Generate filename
+            const fileName = resumeData.personalInfo.fullName 
+                ? `${resumeData.personalInfo.fullName.replace(/\s+/g, '_')}_Resume.png`
+                : 'Resume.png';
+            
+            // Create download link
+            const link = document.createElement('a');
+            link.download = fileName;
+            link.href = imgData;
+            link.click();
+
+            // Save or update resume record to Firebase (data only, no file upload)
+            try {
+                console.log("🔄 Starting Firebase save for PNG export...");
+                const docId = await saveResumeRecord({
+                    fullName: resumeData.personalInfo.fullName,
+                    email: resumeData.personalInfo.email,
+                    phone: resumeData.personalInfo.phone,
+                    location: resumeData.personalInfo.location,
+                    summary: resumeData.summary,
+                    experience: resumeData.experience,
+                    education: resumeData.education,
+                    skills: resumeData.skills,
+                    projects: resumeData.projects,
+                    certifications: resumeData.certifications,
+                    achievements: resumeData.achievements,
+                    template: selectedTemplate,
+                    exportFormat: 'PNG',
+                }, true, resumeRecordId || undefined); // isDownload = true, update existing if recordId exists
+                if (docId) {
+                    setResumeRecordId(docId); // Store the ID for future updates
+                    console.log("✅ Resume saved/updated to Firebase with ID:", docId);
+                } else {
+                    console.error("❌ Failed to save resume to Firebase! Check console for errors above.");
+                }
+            } catch (firebaseError: any) {
+                console.error("❌ Firebase save error:", firebaseError);
+                alert("⚠️ Error saving to Firebase: " + (firebaseError?.message || "Unknown error"));
+            }
+        } catch (error) {
+            console.error('Error exporting PNG:', error);
+            alert('Failed to export resume. Please try again.');
+        } finally {
+            setIsExporting(false);
+        }
+    };
+
+    const handleExportJpg = async () => {
+        if (!resumePreviewRef.current) {
+            alert('Resume preview not available for export');
+            return;
+        }
+
+        setIsExporting(true);
+        try {
+            const canvas = await captureResumeAsCanvas();
+            const imgData = canvas.toDataURL('image/jpeg', 0.95);
+            
+            // Generate filename
+            const fileName = resumeData.personalInfo.fullName 
+                ? `${resumeData.personalInfo.fullName.replace(/\s+/g, '_')}_Resume.jpg`
+                : 'Resume.jpg';
+            
+            // Create download link
+            const link = document.createElement('a');
+            link.download = fileName;
+            link.href = imgData;
+            link.click();
+
+            // Save or update resume record to Firebase (data only, no file upload)
+            try {
+                console.log("🔄 Starting Firebase save for JPG export...");
+                const docId = await saveResumeRecord({
+                    fullName: resumeData.personalInfo.fullName,
+                    email: resumeData.personalInfo.email,
+                    phone: resumeData.personalInfo.phone,
+                    location: resumeData.personalInfo.location,
+                    summary: resumeData.summary,
+                    experience: resumeData.experience,
+                    education: resumeData.education,
+                    skills: resumeData.skills,
+                    projects: resumeData.projects,
+                    certifications: resumeData.certifications,
+                    achievements: resumeData.achievements,
+                    template: selectedTemplate,
+                    exportFormat: 'JPG',
+                }, true, resumeRecordId || undefined); // isDownload = true, update existing if recordId exists
+                if (docId) {
+                    setResumeRecordId(docId); // Store the ID for future updates
+                    console.log("✅ Resume saved/updated to Firebase with ID:", docId);
+                } else {
+                    console.error("❌ Failed to save resume to Firebase! Check console for errors above.");
+                }
+            } catch (firebaseError: any) {
+                console.error("❌ Firebase save error:", firebaseError);
+                alert("⚠️ Error saving to Firebase: " + (firebaseError?.message || "Unknown error"));
+            }
+        } catch (error) {
+            console.error('Error exporting JPG:', error);
+            alert('Failed to export resume. Please try again.');
+        } finally {
+            setIsExporting(false);
+        }
+    };
+
+    const handleExportDoc = async () => {
+        if (!resumePreviewRef.current) {
+            alert('Resume preview not available for export');
+            return;
+        }
+
+        setIsExporting(true);
+        try {
+            const element = resumePreviewRef.current;
+            
+            // Clone the element
+            const clone = element.cloneNode(true) as HTMLElement;
+            
+            // Remove SVG elements and replace with text
+            const svgs = clone.querySelectorAll('svg');
+            svgs.forEach(svg => {
+                const parent = svg.parentElement;
+                if (parent) {
+                    const parentText = parent.textContent || '';
+                    const iconText = parentText.includes('@') ? '✉' :
+                                   parentText.includes('+') || parentText.match(/\d/) ? '📞' :
+                                   parentText.includes('linkedin') ? 'in' :
+                                   parentText.includes('github') || parentText.includes('portfolio') ? '🔗' :
+                                   '📍';
+                    const span = document.createElement('span');
+                    span.textContent = iconText + ' ';
+                    parent.replaceChild(span, svg);
+                }
+            });
+            
+            // Create HTML content
+            const htmlContent = `
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <meta charset="UTF-8">
+                    <style>
+                        body {
+                            font-family: "Mona Sans", ui-sans-serif, system-ui, sans-serif;
+                            padding: 40px;
+                            max-width: 800px;
+                            margin: 0 auto;
+                        }
+                        h1 { font-size: 24px; font-weight: bold; margin-bottom: 10px; }
+                        h2 { font-size: 12px; font-weight: bold; text-transform: uppercase; 
+                             border-bottom: 1px solid #000; padding-bottom: 5px; margin-top: 20px; margin-bottom: 10px; }
+                        p { margin: 5px 0; font-size: 14px; }
+                        ul { margin: 5px 0; padding-left: 20px; }
+                        li { margin: 3px 0; font-size: 14px; }
+                    </style>
+                </head>
+                <body>
+                    ${clone.innerHTML}
+                </body>
+                </html>
+            `;
+            
+            // Generate filename
+            const fileName = resumeData.personalInfo.fullName 
+                ? `${resumeData.personalInfo.fullName.replace(/\s+/g, '_')}_Resume.doc`
+                : 'Resume.doc';
+            
+            // Create blob and download
+            const blob = new Blob(['\ufeff', htmlContent], { type: 'application/msword' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = fileName;
+            link.click();
+            URL.revokeObjectURL(url);
+
+            // Save or update resume record to Firebase (data only, no file upload)
+            try {
+                console.log("🔄 Starting Firebase save for DOC export...");
+                const docId = await saveResumeRecord({
+                    fullName: resumeData.personalInfo.fullName,
+                    email: resumeData.personalInfo.email,
+                    phone: resumeData.personalInfo.phone,
+                    location: resumeData.personalInfo.location,
+                    summary: resumeData.summary,
+                    experience: resumeData.experience,
+                    education: resumeData.education,
+                    skills: resumeData.skills,
+                    projects: resumeData.projects,
+                    certifications: resumeData.certifications,
+                    achievements: resumeData.achievements,
+                    template: selectedTemplate,
+                    exportFormat: 'DOC',
+                }, true, resumeRecordId || undefined); // isDownload = true, update existing if recordId exists
+                if (docId) {
+                    setResumeRecordId(docId); // Store the ID for future updates
+                    console.log("✅ Resume saved/updated to Firebase with ID:", docId);
+                } else {
+                    console.error("❌ Failed to save resume to Firebase! Check console for errors above.");
+                }
+            } catch (firebaseError: any) {
+                console.error("❌ Firebase save error:", firebaseError);
+                alert("⚠️ Error saving to Firebase: " + (firebaseError?.message || "Unknown error"));
+            }
+        } catch (error) {
+            console.error('Error exporting DOC:', error);
+            alert('Failed to export resume. Please try again.');
+        } finally {
+            setIsExporting(false);
+        }
+    };
+
     return (
         <main className="!pt-0 min-h-screen bg-white">
             {/* Navigation */}
@@ -609,7 +1613,17 @@ const Builder = () => {
                 <Link to="/" className="back-button">
                     <img src="/icons/back.svg" alt="back" className="w-2.5 h-2.5" />
                     <span className="text-gray-800 text-sm font-semibold">Back to Homepage</span>
-                        </Link>
+                </Link>
+                <button 
+                    onClick={handleExportPdf}
+                    disabled={isExporting || !hasFormData()}
+                    className="primary-button w-fit flex items-center gap-2"
+                >
+                    {isExporting ? 'Exporting...' : 'Download PDF'}
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                    </svg>
+                </button>
             </nav>
 
             <div className="flex flex-col lg:flex-row w-full lg:h-[calc(100vh-60px)] -mt-2">
@@ -789,7 +1803,18 @@ const Builder = () => {
                         {/* Summary Section */}
                         {activeSection === 'summary' && (
                             <div className="space-y-6">
+                                <div className="flex items-center justify-between">
                                 <h2 className="text-2xl font-bold text-gray-900">Professional Summary</h2>
+                                    <button
+                                        onClick={async () => {
+                                            const summary = await generateSummary(resumeData);
+                                            if (summary) updateSummary(summary);
+                                        }}
+                                        className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700"
+                                    >
+                                        ✨ AI Generate
+                                    </button>
+                                </div>
                                 <div className="form-div">
                                     <label>Summary</label>
                                     <textarea
@@ -864,16 +1889,46 @@ const Builder = () => {
                                             </div>
                                         </div>
                                         <div className="form-div">
-                                            <label>Description</label>
+                                            <div className="flex items-center justify-between mb-2">
+                                                <label>Description</label>
+                                                <button
+                                                    onClick={async () => {
+                                                        const bullets = await generateBulletPoints(
+                                                            exp.position,
+                                                            exp.company,
+                                                            exp.description.filter(d => d.trim())
+                                                        );
+                                                        if (bullets.length > 0) {
+                                                            setResumeData(prev => ({
+                                                                ...prev,
+                                                                experience: prev.experience.map((e, i) =>
+                                                                    i === index ? { ...e, description: bullets } : e
+                                                                )
+                                                            }));
+                                                        }
+                                                    }}
+                                                    className="px-3 py-1 bg-blue-600 text-white rounded text-xs font-medium hover:bg-blue-700"
+                                                >
+                                                    ✨ AI Generate Bullets
+                                                </button>
+                                            </div>
                                             {exp.description.map((desc, descIndex) => (
-                                                <textarea
-                                                    key={descIndex}
-                                                    value={desc}
-                                                    onChange={(e) => updateExperienceDescription(index, descIndex, e.target.value)}
-                                                    placeholder="Describe your responsibilities and achievements..."
-                                                    rows={3}
-                                                    className="mb-2"
-                                                />
+                                                <div key={descIndex} className="mb-2">
+                                                    <textarea
+                                                        value={desc}
+                                                        onChange={(e) => updateExperienceDescription(index, descIndex, e.target.value)}
+                                                        placeholder="Describe your responsibilities and achievements..."
+                                                        rows={3}
+                                                        className="mb-1"
+                                                    />
+                                                    <AIBulletButtons
+                                                        expIndex={index}
+                                                        descIndex={descIndex}
+                                                        text={desc}
+                                                        onUpdate={(newText) => updateExperienceDescription(index, descIndex, newText)}
+                                                        isGenerating={false}
+                                                    />
+                                                </div>
                                             ))}
                                             <button
                                                 onClick={() => addExperienceDescription(index)}
@@ -1092,6 +2147,32 @@ const Builder = () => {
                             </div>
                         )}
 
+                        {/* AI Tools Section */}
+                        {activeSection === 'ai-tools' && (
+                            <div className="space-y-6">
+                                <h2 className="text-2xl font-bold text-gray-900">✨ AI-Powered Tools</h2>
+                                <AIFeatures
+                                    resumeData={resumeData}
+                                    onSummaryUpdate={updateSummary}
+                                    onBulletsUpdate={(expIndex, bullets) => {
+                                        setResumeData(prev => ({
+                                            ...prev,
+                                            experience: prev.experience.map((exp, i) =>
+                                                i === expIndex ? { ...exp, description: bullets } : exp
+                                            )
+                                        }));
+                                    }}
+                                    onDescriptionUpdate={updateExperienceDescription}
+                                    onSkillsUpdate={(skills) => {
+                                        setResumeData(prev => ({
+                                            ...prev,
+                                            skills
+                                        }));
+                                    }}
+                                />
+                            </div>
+                        )}
+
                         {/* Achievements Section */}
                         {activeSection === 'achievements' && (
                             <div className="space-y-6">
@@ -1289,14 +2370,22 @@ const Builder = () => {
                                         <div className="form-div">
                                             <label>Description</label>
                                             {exp.description.map((desc, descIndex) => (
-                                                <textarea
-                                                    key={descIndex}
-                                                    value={desc}
-                                                    onChange={(e) => updateExperienceDescription(index, descIndex, e.target.value)}
-                                                    placeholder="Describe your responsibilities..."
-                                                    rows={2}
-                                                    className="mb-2"
-                                                />
+                                                <div key={descIndex} className="mb-3">
+                                                    <textarea
+                                                        value={desc}
+                                                        onChange={(e) => updateExperienceDescription(index, descIndex, e.target.value)}
+                                                        placeholder="Describe your responsibilities..."
+                                                        rows={2}
+                                                        className="mb-2"
+                                                    />
+                                                    <AIBulletButtons
+                                                        expIndex={index}
+                                                        descIndex={descIndex}
+                                                        text={desc}
+                                                        onUpdate={(newText) => updateExperienceDescription(index, descIndex, newText)}
+                                                        isGenerating={false}
+                                                    />
+                                                </div>
                                             ))}
                                             <button
                                                 onClick={() => addExperienceDescription(index)}
@@ -1547,21 +2636,23 @@ const Builder = () => {
                 {/* Right Side - Resume Preview/Document Viewer */}
                 <section className="w-full lg:w-[55%] bg-[url('/images/bg-small.svg')] bg-cover overflow-y-auto lg:sticky lg:top-0 lg:h-[calc(100vh-60px)] min-h-[500px] order-last">
                     <div className="flex items-start justify-center h-full py-6">
-                        {isConvertingPdf ? (
+                        {isConvertingPdf || isParsing ? (
                             <div className="flex flex-col items-center justify-center">
                                 <img src="/images/resume-scan-2.gif" className="w-full max-w-md" />
-                                <p className="text-gray-600 mt-4">Converting resume...</p>
+                                <p className="text-gray-600 mt-4">
+                                    {isConvertingPdf ? 'Converting resume...' : 'Analyzing resume with AI...'}
+                                </p>
                             </div>
                         ) : hasFormData() ? (
                             // Show template-based resume when form has data (from extraction or manual entry)
-                            <div className="gradient-border max-w-4xl w-full bg-white rounded-2xl shadow-xl">
-                                <div className="p-10 space-y-5">
+                            <div ref={resumePreviewRef} className="gradient-border max-w-4xl w-full bg-white rounded-2xl shadow-xl" style={templateStyles.fontFamilyStyle}>
+                                <div className={`${templateStyles.containerPadding} ${templateStyles.sectionSpacing}`}>
                                 {/* Name and Contact */}
-                                <div className="pb-3">
-                                    <h1 className={`text-3xl font-bold ${templateStyles.headerText} mb-3`}>
+                                <div className={`pb-3 ${templateStyles.headerBorder}`}>
+                                    <h1 className={`${templateStyles.nameSize} ${templateStyles.nameWeight} ${templateStyles.nameSpacing} ${templateStyles.headerText} mb-3`}>
                                         {resumeData.personalInfo.fullName || 'Your Name'}
                                     </h1>
-                                    <div className="flex flex-wrap items-center gap-3 text-sm text-gray-700">
+                                    <div className={`flex flex-wrap items-center ${templateStyles.contactSpacing} ${templateStyles.contactSize} ${templateStyles.contactText}`}>
                                         {resumeData.personalInfo.email && (
                                             <div className="flex items-center gap-1.5">
                                                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1609,40 +2700,40 @@ const Builder = () => {
                                 {/* Professional Summary */}
                                 {resumeData.summary && (
                             <div>
-                                        <h2 className={`text-xs font-bold ${templateStyles.sectionHeader} mb-2 uppercase border-b ${templateStyles.sectionBorder} pb-1`}>PROFESSIONAL SUMMARY</h2>
-                                        <p className="text-sm text-gray-700 leading-relaxed mt-2">{resumeData.summary}</p>
+                                        <h2 className={`${templateStyles.sectionSize} font-bold ${templateStyles.sectionHeader} mb-2 uppercase ${templateStyles.borderWidth} ${templateStyles.sectionBorder} pb-1`}>PROFESSIONAL SUMMARY</h2>
+                                        <p className={`text-sm ${templateStyles.bodyText} leading-relaxed mt-2`}>{resumeData.summary}</p>
                                     </div>
                                 )}
 
                                 {/* Experience */}
                                 {resumeData.experience.length > 0 && resumeData.experience[0].company && (
                                 <div>
-                                        <h2 className={`text-xs font-bold ${templateStyles.sectionHeader} mb-3 uppercase border-b ${templateStyles.sectionBorder} pb-1`}>EXPERIENCE</h2>
+                                        <h2 className={`${templateStyles.sectionSize} font-bold ${templateStyles.sectionHeader} mb-3 uppercase ${templateStyles.borderWidth} ${templateStyles.sectionBorder} pb-1`}>EXPERIENCE</h2>
                                         <div className="space-y-4 mt-3">
                                             {resumeData.experience.map((exp, index) => (
                                                 <div key={index} className="mb-3">
                                                     <div className="flex justify-between items-start mb-1">
                             <div>
-                                                            <p className="font-bold text-sm text-gray-900">
+                                                            <p className={`font-bold text-sm ${templateStyles.headerText}`}>
                                                                 {exp.position || 'Position'}
                                                             </p>
-                                                            <p className="text-sm text-gray-700 font-medium">
+                                                            <p className={`text-sm ${templateStyles.bodyText} font-medium`}>
                                                                 {exp.company}
                                     </p>
                                 </div>
                                                         <div className="text-right">
                                                             {(exp.startDate || exp.endDate) && (
-                                                                <p className="text-sm text-gray-600">
+                                                                <p className={`text-sm ${templateStyles.contactText}`}>
                                                                     {exp.startDate} - {exp.endDate}
                                                                 </p>
                                                             )}
                                                             {exp.location && (
-                                                                <p className="text-sm text-gray-600">{exp.location}</p>
+                                                                <p className={`text-sm ${templateStyles.contactText}`}>{exp.location}</p>
                                                             )}
                             </div>
                                                     </div>
                                                     {exp.description.filter(d => d).length > 0 && (
-                                                        <ul className="list-disc list-inside text-sm text-gray-700 space-y-0.5 mt-1.5 ml-2">
+                                                        <ul className={`list-disc list-inside text-sm ${templateStyles.bodyText} space-y-0.5 mt-1.5 ml-2`}>
                                                             {exp.description.filter(d => d).map((desc, descIndex) => (
                                                                 <li key={descIndex}>{desc}</li>
                                                             ))}
@@ -1657,15 +2748,15 @@ const Builder = () => {
                                 {/* Projects */}
                                 {resumeData.projects.length > 0 && resumeData.projects[0].name && (
                                     <div>
-                                        <h2 className={`text-xs font-bold ${templateStyles.sectionHeader} mb-3 uppercase border-b ${templateStyles.sectionBorder} pb-1`}>PROJECTS</h2>
+                                        <h2 className={`${templateStyles.sectionSize} font-bold ${templateStyles.sectionHeader} mb-3 uppercase ${templateStyles.borderWidth} ${templateStyles.sectionBorder} pb-1`}>PROJECTS</h2>
                                         <div className="space-y-3 mt-3">
                                             {resumeData.projects.map((project, index) => (
                                                 <div key={index}>
-                                                    <h3 className="font-bold text-sm text-gray-900 mb-1">
+                                                    <h3 className={`font-bold text-sm ${templateStyles.headerText} mb-1`}>
                                                         {project.name}
                                                     </h3>
                                                     {project.description && (
-                                                        <p className="text-sm text-gray-700">{project.description}</p>
+                                                        <p className={`text-sm ${templateStyles.bodyText}`}>{project.description}</p>
                                                     )}
                                                 </div>
                                             ))}
@@ -1676,24 +2767,24 @@ const Builder = () => {
                             {/* Education */}
                                 {resumeData.education.length > 0 && resumeData.education[0].degree && (
                             <div>
-                                        <h2 className={`text-xs font-bold ${templateStyles.sectionHeader} mb-3 uppercase border-b ${templateStyles.sectionBorder} pb-1`}>EDUCATION</h2>
+                                        <h2 className={`${templateStyles.sectionSize} font-bold ${templateStyles.sectionHeader} mb-3 uppercase ${templateStyles.borderWidth} ${templateStyles.sectionBorder} pb-1`}>EDUCATION</h2>
                                         <div className="space-y-3 mt-3">
                                             {resumeData.education.map((edu, index) => (
                                                 <div key={index} className="flex justify-between items-start">
                                     <div>
-                                                        <p className="font-bold text-sm text-gray-900">
+                                                        <p className={`font-bold text-sm ${templateStyles.headerText}`}>
                                                             {edu.degree}
                                                         </p>
-                                                        <p className="text-sm text-gray-700 font-medium">
+                                                        <p className={`text-sm ${templateStyles.bodyText} font-medium`}>
                                                             {edu.school}
                                                         </p>
                                     </div>
                                     <div className="text-right">
                                                         {edu.graduationDate && (
-                                                            <p className="text-sm text-gray-600">{edu.graduationDate}</p>
+                                                            <p className={`text-sm ${templateStyles.contactText}`}>{edu.graduationDate}</p>
                                                         )}
                                                         {edu.gpa && (
-                                                            <p className="text-sm text-gray-600">GPA: {edu.gpa}</p>
+                                                            <p className={`text-sm ${templateStyles.contactText}`}>GPA: {edu.gpa}</p>
                                                         )}
                                     </div>
                                 </div>
@@ -1705,14 +2796,14 @@ const Builder = () => {
                                 {/* Skills */}
                                 {(resumeData.skills.technical.length > 0 && resumeData.skills.technical[0]) || (resumeData.skills.soft.length > 0 && resumeData.skills.soft[0]) ? (
                             <div>
-                                        <h2 className={`text-xs font-bold ${templateStyles.sectionHeader} mb-3 uppercase border-b ${templateStyles.sectionBorder} pb-1`}>SKILLS</h2>
+                                        <h2 className={`${templateStyles.sectionSize} font-bold ${templateStyles.sectionHeader} mb-3 uppercase ${templateStyles.borderWidth} ${templateStyles.sectionBorder} pb-1`}>SKILLS</h2>
                                         <div className="mt-3 space-y-3">
                                             {resumeData.skills.technical.filter(s => s).length > 0 && (
                                                 <div>
-                                                    <p className="font-semibold text-sm text-gray-900 mb-1">Technical</p>
+                                                    <p className={`font-semibold text-sm ${templateStyles.headerText} mb-1`}>Technical</p>
                                 <div className="flex flex-wrap gap-2">
                                                         {resumeData.skills.technical.filter(s => s).map((skill, index) => (
-                                                            <span key={index} className="px-3 py-1 bg-gray-100 text-sm text-gray-700 rounded">
+                                                            <span key={index} className={`px-3 py-1 ${templateStyles.skillBg} text-sm ${templateStyles.skillText} rounded`}>
                                             {skill}
                                         </span>
                                     ))}
@@ -1721,10 +2812,10 @@ const Builder = () => {
                                             )}
                                             {resumeData.skills.soft.filter(s => s).length > 0 && (
                             <div>
-                                                    <p className="font-semibold text-sm text-gray-900 mb-1">Soft Skills</p>
+                                                    <p className={`font-semibold text-sm ${templateStyles.headerText} mb-1`}>Soft Skills</p>
                                 <div className="flex flex-wrap gap-2">
                                                         {resumeData.skills.soft.filter(s => s).map((skill, index) => (
-                                                            <span key={index} className="px-3 py-1 bg-gray-100 text-sm text-gray-700 rounded">
+                                                            <span key={index} className={`px-3 py-1 ${templateStyles.skillBg} text-sm ${templateStyles.skillText} rounded`}>
                                             {skill}
                                         </span>
                                     ))}
@@ -1738,10 +2829,10 @@ const Builder = () => {
                                 {/* Certifications */}
                                 {resumeData.certifications.length > 0 && resumeData.certifications[0].name && (
                                     <div>
-                                        <h2 className={`text-xs font-bold ${templateStyles.sectionHeader} mb-3 uppercase border-b ${templateStyles.sectionBorder} pb-1`}>CERTIFICATIONS</h2>
+                                        <h2 className={`${templateStyles.sectionSize} font-bold ${templateStyles.sectionHeader} mb-3 uppercase ${templateStyles.borderWidth} ${templateStyles.sectionBorder} pb-1`}>CERTIFICATIONS</h2>
                                         <div className="space-y-1 mt-3">
                                             {resumeData.certifications.filter(c => c.name).map((cert, index) => (
-                                                <p key={index} className="text-sm text-gray-700">{cert.name}</p>
+                                                <p key={index} className={`text-sm ${templateStyles.bodyText}`}>{cert.name}</p>
                                             ))}
                                         </div>
                                     </div>
@@ -1750,16 +2841,16 @@ const Builder = () => {
                                 {/* Achievements */}
                                 {resumeData.achievements.length > 0 && resumeData.achievements[0].name && (
                                     <div>
-                                        <h2 className={`text-xs font-bold ${templateStyles.sectionHeader} mb-3 uppercase border-b ${templateStyles.sectionBorder} pb-1`}>ACHIEVEMENTS</h2>
+                                        <h2 className={`${templateStyles.sectionSize} font-bold ${templateStyles.sectionHeader} mb-3 uppercase ${templateStyles.borderWidth} ${templateStyles.sectionBorder} pb-1`}>ACHIEVEMENTS</h2>
                                         <div className="space-y-1 mt-3">
                                             {resumeData.achievements.filter(a => a.name).map((ach, index) => (
-                                                <p key={index} className="text-sm text-gray-700">{ach.name}</p>
+                                                <p key={index} className={`text-sm ${templateStyles.bodyText}`}>{ach.name}</p>
                                             ))}
                                         </div>
                                     </div>
                                 )}
                             </div>
-                        </div>
+                            </div>
                         ) : resumeImageUrl && resumePdfUrl && !hasFormData() ? (
                             // Show uploaded resume only if no form data exists yet
                             <div className="animate-in fade-in duration-1000 gradient-border max-sm:m-0 w-full max-w-6xl my-auto">
@@ -1772,7 +2863,7 @@ const Builder = () => {
                                     />
                                 </a>
                             </div>
-                        ) : selectedTemplate === 'modern-professional' && !resumeImageUrl && !hasFormData() && professionalResumeImageUrl ? (
+                        ) : !resumeImageUrl && !hasFormData() && professionalResumeImageUrl ? (
                             <div className="animate-in fade-in duration-1000 gradient-border max-sm:m-0 w-full max-w-6xl my-auto">
                                 <a href="/images/Professional CV Resume.pdf" target="_blank" rel="noopener noreferrer" className="block w-full">
                                     <img
@@ -1783,14 +2874,14 @@ const Builder = () => {
                                 </a>
                             </div>
                         ) : (
-                            <div className="gradient-border max-w-4xl w-full bg-white rounded-2xl shadow-xl">
-                                <div className="p-10 space-y-5">
+                            <div ref={resumePreviewRef} className="gradient-border max-w-4xl w-full bg-white rounded-2xl shadow-xl" style={templateStyles.fontFamilyStyle}>
+                                <div className={`${templateStyles.containerPadding} ${templateStyles.sectionSpacing}`}>
                                 {/* Name and Contact */}
-                                <div className="pb-3">
-                                    <h1 className={`text-3xl font-bold ${templateStyles.headerText} mb-3`}>
+                                <div className={`pb-3 ${templateStyles.headerBorder}`}>
+                                    <h1 className={`${templateStyles.nameSize} ${templateStyles.nameWeight} ${templateStyles.nameSpacing} ${templateStyles.headerText} mb-3`}>
                                         {resumeData.personalInfo.fullName || 'Your Name'}
                                     </h1>
-                                    <div className="flex flex-wrap items-center gap-3 text-sm text-gray-700">
+                                    <div className={`flex flex-wrap items-center ${templateStyles.contactSpacing} ${templateStyles.contactSize} ${templateStyles.contactText}`}>
                                         {resumeData.personalInfo.email && (
                                             <div className="flex items-center gap-1.5">
                                                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1838,40 +2929,40 @@ const Builder = () => {
                                 {/* Professional Summary */}
                                 {resumeData.summary && (
                             <div>
-                                        <h2 className={`text-xs font-bold ${templateStyles.sectionHeader} mb-2 uppercase border-b ${templateStyles.sectionBorder} pb-1`}>PROFESSIONAL SUMMARY</h2>
-                                        <p className="text-sm text-gray-700 leading-relaxed mt-2">{resumeData.summary}</p>
+                                        <h2 className={`${templateStyles.sectionSize} font-bold ${templateStyles.sectionHeader} mb-2 uppercase ${templateStyles.borderWidth} ${templateStyles.sectionBorder} pb-1`}>PROFESSIONAL SUMMARY</h2>
+                                        <p className={`text-sm ${templateStyles.bodyText} leading-relaxed mt-2`}>{resumeData.summary}</p>
                                     </div>
                                 )}
 
                                 {/* Experience */}
                                 {resumeData.experience.length > 0 && resumeData.experience[0].company && (
                                 <div>
-                                        <h2 className={`text-xs font-bold ${templateStyles.sectionHeader} mb-3 uppercase border-b ${templateStyles.sectionBorder} pb-1`}>EXPERIENCE</h2>
+                                        <h2 className={`${templateStyles.sectionSize} font-bold ${templateStyles.sectionHeader} mb-3 uppercase ${templateStyles.borderWidth} ${templateStyles.sectionBorder} pb-1`}>EXPERIENCE</h2>
                                         <div className="space-y-4 mt-3">
                                             {resumeData.experience.map((exp, index) => (
                                                 <div key={index} className="mb-3">
                                                     <div className="flex justify-between items-start mb-1">
                             <div>
-                                                            <p className="font-bold text-sm text-gray-900">
+                                                            <p className={`font-bold text-sm ${templateStyles.headerText}`}>
                                                                 {exp.position || 'Position'}
                                                             </p>
-                                                            <p className="text-sm text-gray-700 font-medium">
+                                                            <p className={`text-sm ${templateStyles.bodyText} font-medium`}>
                                                                 {exp.company}
                                     </p>
                                 </div>
                                                         <div className="text-right">
                                                             {(exp.startDate || exp.endDate) && (
-                                                                <p className="text-sm text-gray-600">
+                                                                <p className={`text-sm ${templateStyles.contactText}`}>
                                                                     {exp.startDate} - {exp.endDate}
                                                                 </p>
                                                             )}
                                                             {exp.location && (
-                                                                <p className="text-sm text-gray-600">{exp.location}</p>
+                                                                <p className={`text-sm ${templateStyles.contactText}`}>{exp.location}</p>
                                                             )}
                             </div>
                                                     </div>
                                                     {exp.description.filter(d => d).length > 0 && (
-                                                        <ul className="list-disc list-inside text-sm text-gray-700 space-y-0.5 mt-1.5 ml-2">
+                                                        <ul className={`list-disc list-inside text-sm ${templateStyles.bodyText} space-y-0.5 mt-1.5 ml-2`}>
                                                             {exp.description.filter(d => d).map((desc, descIndex) => (
                                                                 <li key={descIndex}>{desc}</li>
                                                             ))}
@@ -1886,15 +2977,15 @@ const Builder = () => {
                                 {/* Projects */}
                                 {resumeData.projects.length > 0 && resumeData.projects[0].name && (
                                     <div>
-                                        <h2 className={`text-xs font-bold ${templateStyles.sectionHeader} mb-3 uppercase border-b ${templateStyles.sectionBorder} pb-1`}>PROJECTS</h2>
+                                        <h2 className={`${templateStyles.sectionSize} font-bold ${templateStyles.sectionHeader} mb-3 uppercase ${templateStyles.borderWidth} ${templateStyles.sectionBorder} pb-1`}>PROJECTS</h2>
                                         <div className="space-y-3 mt-3">
                                             {resumeData.projects.map((project, index) => (
                                                 <div key={index}>
-                                                    <h3 className="font-bold text-sm text-gray-900 mb-1">
+                                                    <h3 className={`font-bold text-sm ${templateStyles.headerText} mb-1`}>
                                                         {project.name}
                                                     </h3>
                                                     {project.description && (
-                                                        <p className="text-sm text-gray-700">{project.description}</p>
+                                                        <p className={`text-sm ${templateStyles.bodyText}`}>{project.description}</p>
                                                     )}
                                                 </div>
                                             ))}
@@ -1905,24 +2996,24 @@ const Builder = () => {
                             {/* Education */}
                                 {resumeData.education.length > 0 && resumeData.education[0].degree && (
                             <div>
-                                        <h2 className={`text-xs font-bold ${templateStyles.sectionHeader} mb-3 uppercase border-b ${templateStyles.sectionBorder} pb-1`}>EDUCATION</h2>
+                                        <h2 className={`${templateStyles.sectionSize} font-bold ${templateStyles.sectionHeader} mb-3 uppercase ${templateStyles.borderWidth} ${templateStyles.sectionBorder} pb-1`}>EDUCATION</h2>
                                         <div className="space-y-3 mt-3">
                                             {resumeData.education.map((edu, index) => (
                                                 <div key={index} className="flex justify-between items-start">
                                     <div>
-                                                        <p className="font-bold text-sm text-gray-900">
+                                                        <p className={`font-bold text-sm ${templateStyles.headerText}`}>
                                                             {edu.degree}
                                                         </p>
-                                                        <p className="text-sm text-gray-700 font-medium">
+                                                        <p className={`text-sm ${templateStyles.bodyText} font-medium`}>
                                                             {edu.school}
                                                         </p>
                                     </div>
                                     <div className="text-right">
                                                         {edu.graduationDate && (
-                                                            <p className="text-sm text-gray-600">{edu.graduationDate}</p>
+                                                            <p className={`text-sm ${templateStyles.contactText}`}>{edu.graduationDate}</p>
                                                         )}
                                                         {edu.gpa && (
-                                                            <p className="text-sm text-gray-600">GPA: {edu.gpa}</p>
+                                                            <p className={`text-sm ${templateStyles.contactText}`}>GPA: {edu.gpa}</p>
                                                         )}
                                     </div>
                                 </div>
@@ -1934,14 +3025,14 @@ const Builder = () => {
                                 {/* Skills */}
                                 {(resumeData.skills.technical.length > 0 && resumeData.skills.technical[0]) || (resumeData.skills.soft.length > 0 && resumeData.skills.soft[0]) ? (
                             <div>
-                                        <h2 className={`text-xs font-bold ${templateStyles.sectionHeader} mb-3 uppercase border-b ${templateStyles.sectionBorder} pb-1`}>SKILLS</h2>
+                                        <h2 className={`${templateStyles.sectionSize} font-bold ${templateStyles.sectionHeader} mb-3 uppercase ${templateStyles.borderWidth} ${templateStyles.sectionBorder} pb-1`}>SKILLS</h2>
                                         <div className="mt-3 space-y-3">
                                             {resumeData.skills.technical.filter(s => s).length > 0 && (
                                                 <div>
-                                                    <p className="font-semibold text-sm text-gray-900 mb-1">Technical</p>
+                                                    <p className={`font-semibold text-sm ${templateStyles.headerText} mb-1`}>Technical</p>
                                 <div className="flex flex-wrap gap-2">
                                                         {resumeData.skills.technical.filter(s => s).map((skill, index) => (
-                                                            <span key={index} className="px-3 py-1 bg-gray-100 text-sm text-gray-700 rounded">
+                                                            <span key={index} className={`px-3 py-1 ${templateStyles.skillBg} text-sm ${templateStyles.skillText} rounded`}>
                                             {skill}
                                         </span>
                                     ))}
@@ -1950,10 +3041,10 @@ const Builder = () => {
                                             )}
                                             {resumeData.skills.soft.filter(s => s).length > 0 && (
                             <div>
-                                                    <p className="font-semibold text-sm text-gray-900 mb-1">Soft Skills</p>
+                                                    <p className={`font-semibold text-sm ${templateStyles.headerText} mb-1`}>Soft Skills</p>
                                 <div className="flex flex-wrap gap-2">
                                                         {resumeData.skills.soft.filter(s => s).map((skill, index) => (
-                                                            <span key={index} className="px-3 py-1 bg-gray-100 text-sm text-gray-700 rounded">
+                                                            <span key={index} className={`px-3 py-1 ${templateStyles.skillBg} text-sm ${templateStyles.skillText} rounded`}>
                                             {skill}
                                         </span>
                                     ))}
@@ -1967,10 +3058,10 @@ const Builder = () => {
                                 {/* Certifications */}
                                 {resumeData.certifications.length > 0 && resumeData.certifications[0].name && (
                                     <div>
-                                        <h2 className={`text-xs font-bold ${templateStyles.sectionHeader} mb-3 uppercase border-b ${templateStyles.sectionBorder} pb-1`}>CERTIFICATIONS</h2>
+                                        <h2 className={`${templateStyles.sectionSize} font-bold ${templateStyles.sectionHeader} mb-3 uppercase ${templateStyles.borderWidth} ${templateStyles.sectionBorder} pb-1`}>CERTIFICATIONS</h2>
                                         <div className="space-y-1 mt-3">
                                             {resumeData.certifications.filter(c => c.name).map((cert, index) => (
-                                                <p key={index} className="text-sm text-gray-700">{cert.name}</p>
+                                                <p key={index} className={`text-sm ${templateStyles.bodyText}`}>{cert.name}</p>
                                             ))}
                                         </div>
                                     </div>
@@ -1979,10 +3070,10 @@ const Builder = () => {
                                 {/* Achievements */}
                                 {resumeData.achievements.length > 0 && resumeData.achievements[0].name && (
                                     <div>
-                                        <h2 className={`text-xs font-bold ${templateStyles.sectionHeader} mb-3 uppercase border-b ${templateStyles.sectionBorder} pb-1`}>ACHIEVEMENTS</h2>
+                                        <h2 className={`${templateStyles.sectionSize} font-bold ${templateStyles.sectionHeader} mb-3 uppercase ${templateStyles.borderWidth} ${templateStyles.sectionBorder} pb-1`}>ACHIEVEMENTS</h2>
                                         <div className="space-y-1 mt-3">
                                             {resumeData.achievements.filter(a => a.name).map((ach, index) => (
-                                                <p key={index} className="text-sm text-gray-700">{ach.name}</p>
+                                                <p key={index} className={`text-sm ${templateStyles.bodyText}`}>{ach.name}</p>
                                             ))}
                                         </div>
                                     </div>

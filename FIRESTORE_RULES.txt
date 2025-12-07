@@ -1,0 +1,30 @@
+// Copy and paste these rules into Firebase Console → Firestore Database → Rules
+// IMPORTANT: These rules allow public read/write access for testing. 
+// For production, implement proper authentication-based rules.
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Allow reads and writes to resume_builder collection (flat structure, like ats_analyses)
+    match /resume_builder/{document} {
+      allow read, write: if true;
+    }
+    
+    // Allow reads and writes to ats_analyses collection
+    match /ats_analyses/{document} {
+      allow read, write: if true;
+    }
+    
+    // Allow reads and writes to cover_letters collection
+    match /cover_letters/{document} {
+      allow read, write: if true;
+    }
+    
+    // Allow writes to error_logs collection (for error tracking)
+    match /error_logs/{document} {
+      allow write: if true;
+      allow read: if true; // Allow admin to read logs
+    }
+  }
+}
