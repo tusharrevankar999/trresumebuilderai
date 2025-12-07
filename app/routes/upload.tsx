@@ -32,40 +32,86 @@ const Upload = () => {
     const handleAnalyze = async ({ companyName, jobTitle, jobDescription, file }: { companyName: string, jobTitle: string, jobDescription: string, file: File }) => {
         setIsProcessing(true);
 
-        setStatusText('Uploading the file...');
-        const uploadedFile = await fileStorage.upload([file]);
-        if(!uploadedFile) {
-            setIsProcessing(false);
-            return setStatusText('Error: Failed to upload file');
-        }
+        try {
+            setStatusText('Uploading the file...');
+            const uploadedFile = await fileStorage.upload([file]);
+            if(!uploadedFile) {
+                const error = new Error('Failed to upload file');
+                const { saveErrorLog } = await import('~/lib/firebase');
+                await saveErrorLog(error, {
+                    errorType: 'FILE_UPLOAD',
+                    fileName: file.name,
+                    fileSize: file.size,
+                    page: 'upload',
+                    action: 'fileStorage.upload',
+                });
+                setIsProcessing(false);
+                return setStatusText('Error: Failed to upload file');
+            }
 
-        setStatusText('Converting to image...');
-        const imageFile = await convertPdfToImage(file);
-        if(!imageFile.file) {
-            setIsProcessing(false);
-            return setStatusText('Error: Failed to convert PDF to image');
-        }
+            setStatusText('Converting to image...');
+            const imageFile = await convertPdfToImage(file);
+            if(!imageFile.file) {
+                const error = new Error('Failed to convert PDF to image');
+                const { saveErrorLog } = await import('~/lib/firebase');
+                await saveErrorLog(error, {
+                    errorType: 'PDF_TO_IMAGE_CONVERSION',
+                    fileName: file.name,
+                    fileSize: file.size,
+                    page: 'upload',
+                    action: 'convertPdfToImage',
+                });
+                setIsProcessing(false);
+                return setStatusText('Error: Failed to convert PDF to image');
+            }
 
-        setStatusText('Uploading the image...');
-        const uploadedImage = await fileStorage.upload([imageFile.file]);
-        if(!uploadedImage) {
-            setIsProcessing(false);
-            return setStatusText('Error: Failed to upload image');
-        }
+            setStatusText('Uploading the image...');
+            const uploadedImage = await fileStorage.upload([imageFile.file]);
+            if(!uploadedImage) {
+                const error = new Error('Failed to upload image');
+                const { saveErrorLog } = await import('~/lib/firebase');
+                await saveErrorLog(error, {
+                    errorType: 'IMAGE_UPLOAD',
+                    fileName: file.name,
+                    page: 'upload',
+                    action: 'fileStorage.upload',
+                });
+                setIsProcessing(false);
+                return setStatusText('Error: Failed to upload image');
+            }
 
-        setStatusText('Extracting resume text...');
-        const resumeText = await extractTextFromPdf(file);
-        if (!resumeText) {
-            setIsProcessing(false);
-            return setStatusText('Error: Failed to extract text from resume');
-        }
+            setStatusText('Extracting resume text...');
+            const resumeText = await extractTextFromPdf(file);
+            if (!resumeText || resumeText.trim().length < 10) {
+                const error = new Error('Failed to extract text from resume or text too short');
+                const { saveErrorLog } = await import('~/lib/firebase');
+                await saveErrorLog(error, {
+                    errorType: 'PDF_TEXT_EXTRACTION',
+                    fileName: file.name,
+                    fileSize: file.size,
+                    textLength: resumeText?.length || 0,
+                    page: 'upload',
+                    action: 'extractTextFromPdf',
+                });
+                setIsProcessing(false);
+                return setStatusText('Error: Failed to extract text from resume');
+            }
 
-        setStatusText('Parsing resume data...');
-        const parsedResumeData = await parseResumeWithGemini(resumeText);
-        if (!parsedResumeData) {
-            setIsProcessing(false);
-            return setStatusText('Error: Failed to parse resume. Please check your Gemini API key.');
-        }
+            setStatusText('Parsing resume data...');
+            const parsedResumeData = await parseResumeWithGemini(resumeText);
+            if (!parsedResumeData) {
+                const error = new Error('Failed to parse resume with AI');
+                const { saveErrorLog } = await import('~/lib/firebase');
+                await saveErrorLog(error, {
+                    errorType: 'AI_RESUME_PARSING',
+                    fileName: file.name,
+                    textLength: resumeText.length,
+                    page: 'upload',
+                    action: 'parseResumeWithGemini',
+                });
+                setIsProcessing(false);
+                return setStatusText('Error: Failed to parse resume. Please check your API key.');
+            }
 
         setStatusText('Processing job description...');
         const jdText = jobDescription;
@@ -130,9 +176,22 @@ const Upload = () => {
             });
         }
 
-        setStatusText('Analysis complete, redirecting...');
-        console.log(data);
-        navigate(`/resume/${uuid}`);
+            setStatusText('Analysis complete, redirecting...');
+            console.log(data);
+            navigate(`/resume/${uuid}`);
+        } catch (error) {
+            console.error('❌ Error in handleAnalyze:', error);
+            const { saveErrorLog } = await import('~/lib/firebase');
+            await saveErrorLog(error instanceof Error ? error : new Error(String(error)), {
+                errorType: 'RESUME_ANALYSIS',
+                fileName: file.name,
+                fileSize: file.size,
+                page: 'upload',
+                action: 'handleAnalyze',
+            });
+            setIsProcessing(false);
+            setStatusText('Error: An unexpected error occurred. Please try again.');
+        }
     }
 
     const handleSubmit = (e: FormEvent<HTMLFormElement>) => {

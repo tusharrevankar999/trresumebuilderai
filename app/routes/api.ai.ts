@@ -79,8 +79,8 @@ async function callHuggingFace(prompt: string, model?: string): Promise<Response
                         content: prompt
                     }
                 ],
-                max_tokens: 2000,
-                temperature: 0.7,
+                max_tokens: 4000, // Increased for better resume parsing
+                temperature: 0.1, // Lower temperature for more accurate extraction (less creativity)
             }),
         }
     );
@@ -106,8 +106,8 @@ async function callHuggingFace(prompt: string, model?: string): Promise<Response
                                     content: prompt
                                 }
                             ],
-                            max_tokens: 2000,
-                            temperature: 0.7,
+                            max_tokens: 4000, // Increased for better resume parsing
+                            temperature: 0.1, // Lower temperature for more accurate extraction
                         }),
                     }
                 );

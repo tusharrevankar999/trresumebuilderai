@@ -68,8 +68,7 @@ const Builder = () => {
     const [selectedTemplate, setSelectedTemplate] = useState<string>('modern-classic');
     const [activeSection, setActiveSection] = useState<string>('personal');
     const [isExporting, setIsExporting] = useState(false);
-    const [showExportMenu, setShowExportMenu] = useState(false);
-    const exportMenuRef = useRef<HTMLDivElement>(null);
+    const [resumeRecordId, setResumeRecordId] = useState<string | null>(null); // Track Firebase document ID
     const [resumeData, setResumeData] = useState<ResumeData>({
         personalInfo: {
             fullName: '',
@@ -360,61 +359,180 @@ const Builder = () => {
     // Convert PDF to image and extract text when file is uploaded
     useEffect(() => {
         const convertPdf = async () => {
+            console.log('🔄 useEffect triggered, uploadedFile:', uploadedFile?.name || 'null');
             if (uploadedFile) {
+                console.log('📁 Processing uploaded file:', uploadedFile.name, uploadedFile.size, 'bytes');
                 setIsConvertingPdf(true);
                 try {
                     // Create PDF URL for download
                     const pdfBlob = new Blob([uploadedFile], { type: 'application/pdf' });
                     const pdfUrl = URL.createObjectURL(pdfBlob);
                     setResumePdfUrl(pdfUrl);
+                    console.log('✅ PDF URL created');
 
                     // Convert to image for display
                     const result = await convertPdfToImage(uploadedFile);
                     if (result.imageUrl) {
                         setResumeImageUrl(result.imageUrl);
+                        console.log('✅ PDF converted to image');
                     }
 
                     // Extract text and populate form using Gemini AI
+                    console.log('📝 Starting text extraction...');
                     setIsParsing(true);
                     const extractedText = await extractTextFromPdf(uploadedFile);
-                    if (extractedText) {
-                        // Try Gemini AI first for better accuracy
-                        const geminiParsed = await parseResumeWithGemini(extractedText);
-                        if (geminiParsed) {
-                            // Use Gemini parsed data
-                            setResumeData(prev => ({
-                                ...prev,
-                                personalInfo: {
-                                    fullName: geminiParsed.personalInfo.fullName || prev.personalInfo.fullName,
-                                    email: geminiParsed.personalInfo.email || prev.personalInfo.email,
-                                    phone: geminiParsed.personalInfo.phone || prev.personalInfo.phone,
-                                    location: geminiParsed.personalInfo.location || prev.personalInfo.location,
-                                    linkedin: geminiParsed.personalInfo.linkedin || prev.personalInfo.linkedin,
-                                    portfolio: geminiParsed.personalInfo.portfolio || prev.personalInfo.portfolio
-                                },
-                                summary: geminiParsed.summary || prev.summary,
-                                experience: geminiParsed.experience.length > 0 ? geminiParsed.experience : prev.experience,
-                                education: geminiParsed.education.length > 0 ? geminiParsed.education : prev.education,
-                                skills: {
-                                    technical: geminiParsed.skills.technical.length > 0 ? geminiParsed.skills.technical : prev.skills.technical,
-                                    soft: geminiParsed.skills.soft.length > 0 ? geminiParsed.skills.soft : prev.skills.soft
-                                },
-                                projects: geminiParsed.projects.length > 0 ? geminiParsed.projects : prev.projects,
-                                certifications: geminiParsed.certifications.length > 0 ? geminiParsed.certifications : prev.certifications,
-                                achievements: geminiParsed.achievements.length > 0 ? geminiParsed.achievements : prev.achievements
-                            }));
-                        } else {
-                            // Fallback to regex parsing if Gemini fails
-                        parseResumeText(extractedText);
-                    }
+                    console.log('📄 Extracted resume text length:', extractedText?.length || 0);
+                    console.log('📄 First 300 chars of extracted text:', extractedText?.substring(0, 300));
+                    
+                    // Validate that we actually extracted meaningful text (at least 50 characters)
+                    if (extractedText && extractedText.trim().length > 50) {
+                        console.log('✅ Text extraction successful, proceeding with AI parsing');
+                        console.log('🤖 Calling AI to parse resume...');
+                        console.log('📤 Sending to parseResumeWithGemini, text length:', extractedText.length);
+                        try {
+                            const geminiParsed = await parseResumeWithGemini(extractedText);
+                            console.log('📥 Received response from parseResumeWithGemini:', geminiParsed ? 'SUCCESS' : 'NULL');
+                            if (geminiParsed) {
+                                console.log('✅ AI parsing successful:', {
+                                    name: geminiParsed.personalInfo?.fullName,
+                                    email: geminiParsed.personalInfo?.email
+                                });
+                                // Use Gemini parsed data
+                                setResumeData(prev => ({
+                                    ...prev,
+                                    personalInfo: {
+                                        fullName: geminiParsed.personalInfo.fullName || prev.personalInfo.fullName,
+                                        email: geminiParsed.personalInfo.email || prev.personalInfo.email,
+                                        phone: geminiParsed.personalInfo.phone || prev.personalInfo.phone,
+                                        location: geminiParsed.personalInfo.location || prev.personalInfo.location,
+                                        linkedin: geminiParsed.personalInfo.linkedin || prev.personalInfo.linkedin,
+                                        portfolio: geminiParsed.personalInfo.portfolio || prev.personalInfo.portfolio
+                                    },
+                                    summary: geminiParsed.summary || prev.summary,
+                                    experience: geminiParsed.experience.length > 0 ? geminiParsed.experience : prev.experience,
+                                    education: geminiParsed.education.length > 0 ? geminiParsed.education : prev.education,
+                                    skills: {
+                                        technical: geminiParsed.skills.technical.length > 0 ? geminiParsed.skills.technical : prev.skills.technical,
+                                        soft: geminiParsed.skills.soft.length > 0 ? geminiParsed.skills.soft : prev.skills.soft
+                                    },
+                                    projects: geminiParsed.projects.length > 0 ? geminiParsed.projects : prev.projects,
+                                    certifications: geminiParsed.certifications.length > 0 ? geminiParsed.certifications : prev.certifications,
+                                    achievements: geminiParsed.achievements.length > 0 ? geminiParsed.achievements : prev.achievements
+                                }));
+                                
+                                // Save resume record when data is parsed (not downloaded yet)
+                                try {
+                                    const updatedResumeData = {
+                                        ...resumeData,
+                                        personalInfo: {
+                                            fullName: geminiParsed.personalInfo.fullName || resumeData.personalInfo.fullName,
+                                            email: geminiParsed.personalInfo.email || resumeData.personalInfo.email,
+                                            phone: geminiParsed.personalInfo.phone || resumeData.personalInfo.phone,
+                                            location: geminiParsed.personalInfo.location || resumeData.personalInfo.location,
+                                            linkedin: geminiParsed.personalInfo.linkedin || resumeData.personalInfo.linkedin,
+                                            portfolio: geminiParsed.personalInfo.portfolio || resumeData.personalInfo.portfolio
+                                        },
+                                        summary: geminiParsed.summary || resumeData.summary,
+                                        experience: geminiParsed.experience.length > 0 ? geminiParsed.experience : resumeData.experience,
+                                        education: geminiParsed.education.length > 0 ? geminiParsed.education : resumeData.education,
+                                        skills: {
+                                            technical: geminiParsed.skills.technical.length > 0 ? geminiParsed.skills.technical : resumeData.skills.technical,
+                                            soft: geminiParsed.skills.soft.length > 0 ? geminiParsed.skills.soft : resumeData.skills.soft
+                                        },
+                                        projects: geminiParsed.projects.length > 0 ? geminiParsed.projects : resumeData.projects,
+                                        certifications: geminiParsed.certifications.length > 0 ? geminiParsed.certifications : resumeData.certifications,
+                                        achievements: geminiParsed.achievements.length > 0 ? geminiParsed.achievements : resumeData.achievements
+                                    };
+                                    
+                                    // Only save if we have meaningful data
+                                    if (updatedResumeData.personalInfo.fullName || updatedResumeData.personalInfo.email) {
+                                        console.log('💾 Saving resume record to Firebase (created, not downloaded)...');
+                                        const docId = await saveResumeRecord({
+                                            fullName: updatedResumeData.personalInfo.fullName,
+                                            email: updatedResumeData.personalInfo.email,
+                                            phone: updatedResumeData.personalInfo.phone,
+                                            location: updatedResumeData.personalInfo.location,
+                                            summary: updatedResumeData.summary,
+                                            experience: updatedResumeData.experience,
+                                            education: updatedResumeData.education,
+                                            skills: updatedResumeData.skills,
+                                            projects: updatedResumeData.projects,
+                                            certifications: updatedResumeData.certifications,
+                                            achievements: updatedResumeData.achievements,
+                                            template: selectedTemplate,
+                                        }, false); // isDownload = false
+                                        
+                                        if (docId) {
+                                            setResumeRecordId(docId);
+                                            console.log('✅ Resume record saved (created) with ID:', docId);
+                                        }
+                                    }
+                                } catch (saveError) {
+                                    console.error('❌ Error saving resume record on parse:', saveError);
+                                }
+                            } else {
+                                console.warn('⚠️ AI parsing returned null, falling back to regex parsing');
+                                // Fallback to regex parsing if Gemini fails
+                                parseResumeText(extractedText);
+                            }
+                        } catch (aiError) {
+                            console.error('❌ Error calling AI parsing:', aiError);
+                            
+                            // Save error to Firebase
+                            try {
+                                const { saveErrorLog } = await import('~/lib/firebase');
+                                await saveErrorLog(aiError instanceof Error ? aiError : new Error(String(aiError)), {
+                                    errorType: 'AI_PARSING_CALL_ERROR',
+                                    textLength: extractedText.length,
+                                    fileName: uploadedFile.name,
+                                    page: 'builder',
+                                    action: 'parseResumeWithGemini',
+                                });
+                            } catch (logError) {
+                                console.error('Failed to log error to Firebase:', logError);
+                            }
+                            
+                            // Fallback to regex parsing if AI call fails
+                            parseResumeText(extractedText);
+                        }
+                    } else {
+                        const textLength = extractedText?.trim().length || 0;
+                        console.error('❌ Text extraction failed or insufficient text extracted');
+                        console.error('📊 Extracted text length:', textLength);
+                        console.error('⚠️ Cannot call AI with insufficient text. This might be a scanned/image-based PDF.');
+                        console.error('💡 Suggestion: Try using a PDF with selectable text, or use OCR to convert scanned PDFs first.');
+                        
+                        // Still try regex parsing as fallback even with minimal text
+                        if (extractedText && textLength > 0) {
+                            console.log('🔄 Attempting regex parsing as fallback...');
+                            parseResumeText(extractedText);
+                        }
                     }
                     setIsParsing(false);
+                    console.log('✅ Finished processing PDF');
                 } catch (error) {
-                    console.error('Error processing PDF:', error);
+                    console.error('❌ Error processing PDF:', error);
+                    console.error('Error details:', error instanceof Error ? error.message : error);
+                    setIsParsing(false);
+                    
+                    // Save error to Firebase
+                    try {
+                        const { saveErrorLog } = await import('~/lib/firebase');
+                        await saveErrorLog(error instanceof Error ? error : new Error(String(error)), {
+                            errorType: 'PDF_PROCESSING',
+                            fileName: uploadedFile.name,
+                            fileSize: uploadedFile.size,
+                            page: 'builder',
+                            action: 'convertPdf',
+                        });
+                    } catch (logError) {
+                        console.error('Failed to log error to Firebase:', logError);
+                    }
                 } finally {
                     setIsConvertingPdf(false);
                 }
             } else {
+                console.log('ℹ️ No file uploaded yet');
                 setResumeImageUrl('');
                 setResumePdfUrl('');
             }
@@ -1180,7 +1298,6 @@ const Builder = () => {
     };
 
     const handleExportPdf = async () => {
-        setShowExportMenu(false);
         if (!resumePreviewRef.current) {
             alert('Resume preview not available for export');
             return;
@@ -1212,8 +1329,19 @@ const Builder = () => {
             // Save PDF to user's device
             pdf.save(fileName);
 
-            // Save resume record to Firebase (data only, no file upload)
+            // Save or update resume record to Firebase (data only, no file upload)
             try {
+                console.log("🔄 Starting Firebase save for PDF export...");
+                console.log("📋 Resume data:", {
+                    fullName: resumeData.personalInfo.fullName,
+                    email: resumeData.personalInfo.email,
+                    template: selectedTemplate,
+                    hasExperience: resumeData.experience?.length > 0,
+                    hasEducation: resumeData.education?.length > 0,
+                    existingRecordId: resumeRecordId
+                });
+                
+                // Update existing record if it exists, otherwise create new one
                 const docId = await saveResumeRecord({
                     fullName: resumeData.personalInfo.fullName,
                     email: resumeData.personalInfo.email,
@@ -1228,15 +1356,24 @@ const Builder = () => {
                     achievements: resumeData.achievements,
                     template: selectedTemplate,
                     exportFormat: 'PDF',
-                    downloadedAt: Timestamp.now()
-                });
+                }, true, resumeRecordId || undefined); // isDownload = true, update existing if recordId exists
+                
                 if (docId) {
-                    console.log("✅ Resume saved to Firebase with ID:", docId);
+                    setResumeRecordId(docId); // Store the ID for future updates
+                    console.log("✅ Resume saved/updated to Firebase with ID:", docId);
+                    console.log("📍 Check Firebase Console: users/" + (resumeData.personalInfo.email || 'anonymous') + "/cvs/" + docId);
                 } else {
-                    console.warn("⚠️ Failed to save resume to Firebase, but download completed successfully.");
+                    console.error("❌ Failed to save resume to Firebase! Check console for errors above.");
+                    alert("⚠️ Resume downloaded but failed to save to database. Check console for details.");
                 }
-            } catch (firebaseError) {
-                console.error("Firebase save error (non-blocking):", firebaseError);
+            } catch (firebaseError: any) {
+                console.error("❌ Firebase save error (non-blocking):", firebaseError);
+                console.error("Error details:", {
+                    code: firebaseError?.code,
+                    message: firebaseError?.message,
+                    stack: firebaseError?.stack
+                });
+                alert("⚠️ Error saving to Firebase: " + (firebaseError?.message || "Unknown error"));
             }
         } catch (error) {
             console.error('Error exporting PDF:', error);
@@ -1247,7 +1384,6 @@ const Builder = () => {
     };
 
     const handleExportPng = async () => {
-        setShowExportMenu(false);
         if (!resumePreviewRef.current) {
             alert('Resume preview not available for export');
             return;
@@ -1269,8 +1405,9 @@ const Builder = () => {
             link.href = imgData;
             link.click();
 
-            // Save resume record to Firebase (data only, no file upload)
+            // Save or update resume record to Firebase (data only, no file upload)
             try {
+                console.log("🔄 Starting Firebase save for PNG export...");
                 const docId = await saveResumeRecord({
                     fullName: resumeData.personalInfo.fullName,
                     email: resumeData.personalInfo.email,
@@ -1285,15 +1422,16 @@ const Builder = () => {
                     achievements: resumeData.achievements,
                     template: selectedTemplate,
                     exportFormat: 'PNG',
-                    downloadedAt: Timestamp.now()
-                });
+                }, true, resumeRecordId || undefined); // isDownload = true, update existing if recordId exists
                 if (docId) {
-                    console.log("✅ Resume saved to Firebase with ID:", docId);
+                    setResumeRecordId(docId); // Store the ID for future updates
+                    console.log("✅ Resume saved/updated to Firebase with ID:", docId);
                 } else {
-                    console.warn("⚠️ Failed to save resume to Firebase, but download completed successfully.");
+                    console.error("❌ Failed to save resume to Firebase! Check console for errors above.");
                 }
-            } catch (firebaseError) {
-                console.error("Firebase save error (non-blocking):", firebaseError);
+            } catch (firebaseError: any) {
+                console.error("❌ Firebase save error:", firebaseError);
+                alert("⚠️ Error saving to Firebase: " + (firebaseError?.message || "Unknown error"));
             }
         } catch (error) {
             console.error('Error exporting PNG:', error);
@@ -1304,7 +1442,6 @@ const Builder = () => {
     };
 
     const handleExportJpg = async () => {
-        setShowExportMenu(false);
         if (!resumePreviewRef.current) {
             alert('Resume preview not available for export');
             return;
@@ -1326,8 +1463,9 @@ const Builder = () => {
             link.href = imgData;
             link.click();
 
-            // Save resume record to Firebase (data only, no file upload)
+            // Save or update resume record to Firebase (data only, no file upload)
             try {
+                console.log("🔄 Starting Firebase save for JPG export...");
                 const docId = await saveResumeRecord({
                     fullName: resumeData.personalInfo.fullName,
                     email: resumeData.personalInfo.email,
@@ -1342,15 +1480,16 @@ const Builder = () => {
                     achievements: resumeData.achievements,
                     template: selectedTemplate,
                     exportFormat: 'JPG',
-                    downloadedAt: Timestamp.now()
-                });
+                }, true, resumeRecordId || undefined); // isDownload = true, update existing if recordId exists
                 if (docId) {
-                    console.log("✅ Resume saved to Firebase with ID:", docId);
+                    setResumeRecordId(docId); // Store the ID for future updates
+                    console.log("✅ Resume saved/updated to Firebase with ID:", docId);
                 } else {
-                    console.warn("⚠️ Failed to save resume to Firebase, but download completed successfully.");
+                    console.error("❌ Failed to save resume to Firebase! Check console for errors above.");
                 }
-            } catch (firebaseError) {
-                console.error("Firebase save error (non-blocking):", firebaseError);
+            } catch (firebaseError: any) {
+                console.error("❌ Firebase save error:", firebaseError);
+                alert("⚠️ Error saving to Firebase: " + (firebaseError?.message || "Unknown error"));
             }
         } catch (error) {
             console.error('Error exporting JPG:', error);
@@ -1361,7 +1500,6 @@ const Builder = () => {
     };
 
     const handleExportDoc = async () => {
-        setShowExportMenu(false);
         if (!resumePreviewRef.current) {
             alert('Resume preview not available for export');
             return;
@@ -1432,8 +1570,9 @@ const Builder = () => {
             link.click();
             URL.revokeObjectURL(url);
 
-            // Save resume record to Firebase (data only, no file upload)
+            // Save or update resume record to Firebase (data only, no file upload)
             try {
+                console.log("🔄 Starting Firebase save for DOC export...");
                 const docId = await saveResumeRecord({
                     fullName: resumeData.personalInfo.fullName,
                     email: resumeData.personalInfo.email,
@@ -1448,15 +1587,16 @@ const Builder = () => {
                     achievements: resumeData.achievements,
                     template: selectedTemplate,
                     exportFormat: 'DOC',
-                    downloadedAt: Timestamp.now()
-                });
+                }, true, resumeRecordId || undefined); // isDownload = true, update existing if recordId exists
                 if (docId) {
-                    console.log("✅ Resume saved to Firebase with ID:", docId);
+                    setResumeRecordId(docId); // Store the ID for future updates
+                    console.log("✅ Resume saved/updated to Firebase with ID:", docId);
                 } else {
-                    console.warn("⚠️ Failed to save resume to Firebase, but download completed successfully.");
+                    console.error("❌ Failed to save resume to Firebase! Check console for errors above.");
                 }
-            } catch (firebaseError) {
-                console.error("Firebase save error (non-blocking):", firebaseError);
+            } catch (firebaseError: any) {
+                console.error("❌ Firebase save error:", firebaseError);
+                alert("⚠️ Error saving to Firebase: " + (firebaseError?.message || "Unknown error"));
             }
         } catch (error) {
             console.error('Error exporting DOC:', error);
@@ -1466,23 +1606,6 @@ const Builder = () => {
         }
     };
 
-    // Close dropdown when clicking outside
-    useEffect(() => {
-        const handleClickOutside = (event: MouseEvent) => {
-            if (exportMenuRef.current && !exportMenuRef.current.contains(event.target as Node)) {
-                setShowExportMenu(false);
-            }
-        };
-
-        if (showExportMenu) {
-            document.addEventListener('mousedown', handleClickOutside);
-        }
-
-        return () => {
-            document.removeEventListener('mousedown', handleClickOutside);
-        };
-    }, [showExportMenu]);
-
     return (
         <main className="!pt-0 min-h-screen bg-white">
             {/* Navigation */}
@@ -1491,59 +1614,16 @@ const Builder = () => {
                     <img src="/icons/back.svg" alt="back" className="w-2.5 h-2.5" />
                     <span className="text-gray-800 text-sm font-semibold">Back to Homepage</span>
                 </Link>
-                <div className="relative" ref={exportMenuRef}>
-                    <button 
-                        onClick={() => setShowExportMenu(!showExportMenu)}
-                        disabled={isExporting || !hasFormData()}
-                        className="primary-button w-fit flex items-center gap-2"
-                    >
-                        {isExporting ? 'Exporting...' : 'Export'}
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                        </svg>
-                    </button>
-                    
-                    {showExportMenu && (
-                        <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-gray-200 z-50">
-                            <button
-                                onClick={handleExportPdf}
-                                className="w-full px-4 py-3 text-left hover:bg-gray-50 flex items-center gap-3 border-b border-gray-100"
-                            >
-                                <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
-                                </svg>
-                                <span className="text-sm text-gray-700">Download as PDF</span>
-                            </button>
-                            <button
-                                onClick={handleExportDoc}
-                                className="w-full px-4 py-3 text-left hover:bg-gray-50 flex items-center gap-3 border-b border-gray-100"
-                            >
-                                <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
-                                </svg>
-                                <span className="text-sm text-gray-700">Download as DOC</span>
-                            </button>
-                            <button
-                                onClick={handleExportPng}
-                                className="w-full px-4 py-3 text-left hover:bg-gray-50 flex items-center gap-3 border-b border-gray-100"
-                            >
-                                <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                                </svg>
-                                <span className="text-sm text-gray-700">Download as PNG</span>
-                            </button>
-                            <button
-                                onClick={handleExportJpg}
-                                className="w-full px-4 py-3 text-left hover:bg-gray-50 flex items-center gap-3"
-                            >
-                                <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                                </svg>
-                                <span className="text-sm text-gray-700">Download as JPG</span>
-                            </button>
-                        </div>
-                    )}
-                </div>
+                <button 
+                    onClick={handleExportPdf}
+                    disabled={isExporting || !hasFormData()}
+                    className="primary-button w-fit flex items-center gap-2"
+                >
+                    {isExporting ? 'Exporting...' : 'Download PDF'}
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                    </svg>
+                </button>
             </nav>
 
             <div className="flex flex-col lg:flex-row w-full lg:h-[calc(100vh-60px)] -mt-2">

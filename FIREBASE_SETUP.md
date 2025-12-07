@@ -48,26 +48,39 @@
 **Solution:** Update Firestore Security Rules:
 
 1. Go to Firebase Console → Firestore Database → Rules
-2. Update rules to allow writes (for testing):
+2. Update rules to allow writes and collectionGroup queries (for testing):
 
 ```javascript
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     // Allow access to nested cvs collection under users
-    match /users/{userId}/cvs/{document=**} {
+    // This also allows collectionGroup queries on 'cvs' collection
+    match /users/{userId}/cvs/{document} {
       allow read, write: if true;
     }
     
     // Allow reads and writes to ats_analyses collection
-    match /ats_analyses/{document=**} {
+    match /ats_analyses/{document} {
       allow read, write: if true;
+    }
+    
+    // Allow reads and writes to cover_letters collection
+    match /cover_letters/{document} {
+      allow read, write: if true;
+    }
+    
+    // Allow reading users collection (for fallback method)
+    match /users/{userId} {
+      allow read: if true;
     }
   }
 }
 ```
 
 **⚠️ Warning:** The above rules allow anyone to read/write. For production, implement proper authentication-based rules.
+
+**See `FIRESTORE_RULES_UPDATE.md` for detailed instructions.**
 
 ### Issue: Data Not Saving
 

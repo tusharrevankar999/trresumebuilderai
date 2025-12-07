@@ -4,6 +4,8 @@ import Navbar from '~/components/Navbar';
 import { generateCoverLetter, parseResumeWithGemini, type ParsedResumeData, type JobDescription } from '~/lib/ai-features';
 import { extractTextFromPdf } from '~/lib/pdf2img';
 import FileUploader from '~/components/FileUploader';
+import { saveCoverLetterRecord } from '~/lib/firebase';
+import { Timestamp } from 'firebase/firestore';
 
 export const meta = () => ([
     { title: 'Resumind | Cover Letter Generator' },
@@ -67,6 +69,18 @@ const CoverLetter = () => {
             if (letter) {
                 setCoverLetter(letter);
                 setResumeData(parsed); // Store parsed data for future use
+                
+                // Save cover letter record to Firebase
+                await saveCoverLetterRecord({
+                    fullName: parsed.personalInfo.fullName,
+                    email: parsed.personalInfo.email,
+                    companyName: companyName,
+                    jobTitle: jobTitle,
+                    jobDescription: jobDescription,
+                    keyRequirements: requirements || '',
+                    coverLetter: letter,
+                    generatedAt: Timestamp.now()
+                });
             } else {
                 alert('Error generating cover letter. Please check your API key and try again.');
             }

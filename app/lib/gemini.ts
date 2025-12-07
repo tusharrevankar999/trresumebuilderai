@@ -55,63 +55,75 @@ export async function parseResumeWithGemini(
     apiKey?: string
 ): Promise<ParsedResumeData | null> {
     try {
-        const prompt = `You are an expert at parsing resumes. Extract all information from the following resume text and return it as a JSON object with this exact structure:
+        // Log the first 200 characters of the resume text for debugging
+        console.log('📄 Parsing resume text (first 200 chars):', text.substring(0, 200));
+        console.log('📏 Total resume text length:', text.length);
+        
+        const prompt = `You are an expert at parsing resumes. Extract ALL information from the ACTUAL resume text provided below. DO NOT use example data or placeholder values. Parse ONLY the information that exists in the resume text.
 
+IMPORTANT: 
+- Extract information ONLY from the resume text provided below
+- DO NOT make up or invent information
+- DO NOT use example names like "John Doe" or placeholder data
+- If information is missing, use empty strings or empty arrays
+- Return ONLY valid JSON, no markdown, no code blocks, no explanations
+
+Required JSON structure:
 {
   "personalInfo": {
-    "fullName": "string",
-    "email": "string",
-    "phone": "string",
-    "location": "string",
-    "linkedin": "string (full URL or username)",
-    "portfolio": "string (website URL)"
+    "fullName": "string (extract from resume)",
+    "email": "string (extract from resume)",
+    "phone": "string (extract from resume)",
+    "location": "string (extract from resume)",
+    "linkedin": "string (extract from resume, full URL or username)",
+    "portfolio": "string (extract from resume, website URL)"
   },
-  "summary": "string (professional summary/objective)",
+  "summary": "string (extract professional summary/objective from resume)",
   "experience": [
     {
-      "company": "string",
-      "position": "string",
-      "startDate": "string (e.g., 'Jan 2020')",
-      "endDate": "string (e.g., 'Present' or 'Dec 2023')",
-      "location": "string (optional)",
-      "current": boolean,
-      "description": ["string array of bullet points"]
+      "company": "string (extract from resume)",
+      "position": "string (extract from resume)",
+      "startDate": "string (extract from resume, e.g., 'Jan 2020')",
+      "endDate": "string (extract from resume, e.g., 'Present' or 'Dec 2023')",
+      "location": "string (optional, extract from resume)",
+      "current": boolean (true if endDate is Present/Current),
+      "description": ["array of bullet points extracted from resume"]
     }
   ],
   "education": [
     {
-      "degree": "string (e.g., 'Bachelor of Science in Computer Science')",
-      "school": "string",
-      "gpa": "string (if mentioned)",
-      "graduationDate": "string (e.g., 'May 2020')"
+      "degree": "string (extract from resume, e.g., 'Bachelor of Science in Computer Science')",
+      "school": "string (extract from resume)",
+      "gpa": "string (extract from resume if mentioned, otherwise empty string)",
+      "graduationDate": "string (extract from resume, e.g., 'May 2020')"
     }
   ],
   "skills": {
-    "technical": ["array of technical skills"],
-    "soft": ["array of soft skills"]
+    "technical": ["array of technical skills extracted from resume"],
+    "soft": ["array of soft skills extracted from resume"]
   },
   "projects": [
     {
-      "name": "string",
-      "description": "string"
+      "name": "string (extract from resume)",
+      "description": "string (extract from resume)"
     }
   ],
   "certifications": [
     {
-      "name": "string"
+      "name": "string (extract from resume)"
     }
   ],
   "achievements": [
     {
-      "name": "string"
+      "name": "string (extract from resume)"
     }
   ]
 }
 
-Resume text:
+ACTUAL RESUME TEXT TO PARSE:
 ${text}
 
-Return ONLY valid JSON, no markdown, no code blocks, no explanations. If a field is not found, use an empty string or empty array.`;
+Now extract the information from the resume text above and return ONLY the JSON object.`;
 
         // Call Hugging Face AI API through server-side proxy (avoids CORS)
         const hfModel = 'meta-llama/Meta-Llama-3-8B-Instruct';
@@ -146,11 +158,38 @@ Return ONLY valid JSON, no markdown, no code blocks, no explanations. If a field
         const data = await response.json();
         
         if (!data.candidates || !data.candidates[0] || !data.candidates[0].content) {
-            console.error('Invalid response from Hugging Face API');
+            console.error('❌ Invalid response from Hugging Face API:', data);
             return null;
         }
         
         const content = data.candidates[0].content.parts[0].text;
+        console.log('📥 Received AI response (first 500 chars):', content.substring(0, 500));
+        
+        // Check if AI returned an error message instead of JSON
+        const lowerContent = content.toLowerCase();
+        if (lowerContent.includes('cannot parse') || 
+            lowerContent.includes('not provided') || 
+            lowerContent.includes('please provide') ||
+            lowerContent.includes('error') && lowerContent.includes('resume')) {
+            console.error('❌ AI returned an error message instead of JSON:', content);
+            console.error('⚠️ This usually means the resume text extraction failed or text was too short');
+            
+            // Save error to Firebase
+            try {
+                const { saveErrorLog } = await import('./firebase');
+                await saveErrorLog(new Error('AI returned error message instead of JSON'), {
+                    errorType: 'AI_INVALID_RESPONSE',
+                    errorMessage: content.substring(0, 500),
+                    textLength: text.length,
+                    page: 'builder',
+                    action: 'parseResumeWithGemini',
+                });
+            } catch (logError) {
+                console.error('Failed to log error to Firebase:', logError);
+            }
+            
+            return null;
+        }
         
         // Extract JSON from response (remove markdown code blocks if present)
         let jsonText = content.trim();
@@ -160,11 +199,53 @@ Return ONLY valid JSON, no markdown, no code blocks, no explanations. If a field
             jsonText = jsonText.replace(/^```\s*/, '').replace(/\s*```$/, '');
         }
 
-        const parsed = JSON.parse(jsonText) as ParsedResumeData;
-        return validateAndCleanParsedData(parsed);
+        try {
+            const parsed = JSON.parse(jsonText) as ParsedResumeData;
+            console.log('✅ Successfully parsed resume data:', {
+                fullName: parsed.personalInfo?.fullName,
+                email: parsed.personalInfo?.email,
+                experienceCount: parsed.experience?.length || 0,
+                educationCount: parsed.education?.length || 0
+            });
+            return validateAndCleanParsedData(parsed);
+        } catch (parseError) {
+            console.error('❌ Error parsing JSON from AI response:', parseError);
+            console.error('📄 Raw response text:', jsonText.substring(0, 1000));
+            
+            // Save error to Firebase
+            try {
+                const { saveErrorLog } = await import('./firebase');
+                await saveErrorLog(parseError instanceof Error ? parseError : new Error(String(parseError)), {
+                    errorType: 'AI_JSON_PARSE_ERROR',
+                    errorMessage: `Failed to parse JSON: ${parseError instanceof Error ? parseError.message : String(parseError)}`,
+                    rawResponse: jsonText.substring(0, 1000),
+                    textLength: text.length,
+                    page: 'builder',
+                    action: 'parseResumeWithGemini',
+                });
+            } catch (logError) {
+                console.error('Failed to log error to Firebase:', logError);
+            }
+            
+            return null;
+        }
 
     } catch (error) {
-        console.error('Error parsing resume with Hugging Face:', error);
+        console.error('❌ Error parsing resume with Hugging Face:', error);
+        
+        // Save error to Firebase
+        try {
+            const { saveErrorLog } = await import('./firebase');
+            await saveErrorLog(error instanceof Error ? error : new Error(String(error)), {
+                errorType: 'AI_RESUME_PARSING',
+                textLength: text.length,
+                page: 'builder',
+                action: 'parseResumeWithGemini',
+            });
+        } catch (logError) {
+            console.error('Failed to log error to Firebase:', logError);
+        }
+        
         return null;
     }
 }
