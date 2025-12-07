@@ -11,3 +11,6 @@
 .env.*.local
 .env.production
 .env.development
+
+# Setup documentation
+HUGGINGFACE_SETUP.md
